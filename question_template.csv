@@ -1,0 +1,5 @@
+section,day,level,question,optionA,optionB,optionC,optionD,answer
+APT,1,I,"If 3 pens cost 45, what is the cost of 7 pens?","95","105","115","120",B
+APT,1,B,"What is 15% of 200?","25","30","35","40",B
+RSN,1,I,"Find the odd one out","Square","Circle","Triangle","Cube",D
+RSN,2,A,"If CAT is coded as 3-1-20, how is DOG coded?","4-15-7","4-16-7","3-15-7","4-15-8",A
