@@ -6,6 +6,7 @@ import {
 } from '../lib/db';
 import { Batch, AllowedEmail, Track } from '../types';
 import TrainerFeedbackReport from '../components/TrainerFeedbackReport';
+import ErrorBoundary from '../components/ErrorBoundary';
 import { cachedBatches, trackOfBatch } from '../lib/tracks';
 import { sessionTopics, TRACK_LABEL } from '../lib/bank';
 
@@ -61,7 +62,7 @@ export default function Enrollment() {
 
       {tab === 'emails' && canEnroll && <Emails batchId={batchId} addedBy={user!.name} />}
       {tab === 'questions' && <Questions batchId={batchId} />}
-      {tab === 'feedback' && <TrainerFeedbackReport batchId={batchId} isAdmin={isAdmin} />}
+      {tab === 'feedback' && <ErrorBoundary resetKey={tab}><TrainerFeedbackReport batchId={batchId} isAdmin={isAdmin} /></ErrorBoundary>}
     </div>
   );
 }

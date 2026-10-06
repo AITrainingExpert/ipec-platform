@@ -46,14 +46,17 @@ export default function TrainerFeedbackReport({ isAdmin, batchId }: { isAdmin: b
   useEffect(() => {
     setLoading(true);
     Promise.all([getFeedback(isAdmin ? undefined : batchId), getUsers(), getBatches()])
-      .then(([f, u, b]) => { setFb(f); setUsers(u); setBatches(b); setLoading(false); });
+      .then(([f, u, b]) => { setFb(f || []); setUsers(u || []); setBatches(b || []); })
+      .catch(e => console.error('Feedback load failed', e))
+      .finally(() => setLoading(false));
   }, [isAdmin, batchId]);
 
   const batchById = useMemo(() => Object.fromEntries(batches.map(b => [b.id, b])), [batches]);
   const trainersOf = useMemo(() => {
     const m: Record<string, string> = {};
     users.filter(u => u.role === 'trainer' && u.batchId).forEach(u => {
-      m[u.batchId!] = m[u.batchId!] ? `${m[u.batchId!]}, ${u.name}` : u.name;
+      const n = u.name || u.email || 'Trainer';
+      m[u.batchId!] = m[u.batchId!] ? `${m[u.batchId!]}, ${n}` : n;
     });
     return m;
   }, [users]);
@@ -63,9 +66,11 @@ export default function TrainerFeedbackReport({ isAdmin, batchId }: { isAdmin: b
     const b = batchById[f.batchId || ''];
     return {
       ...f,
-      batchName: b?.name || f.batchId || '—',
+      batchName: String(b?.name || f.batchId || '—'),
+      userName: String(f.userName || '—'),
+      comments: f.comments ? String(f.comments) : '',
       track: trackOfBatch(b) as Track,
-      trainer: trainersOf[f.batchId || ''] || 'Unassigned',
+      trainer: String(trainersOf[f.batchId || ''] || 'Unassigned'),
       day: (f.sessionKey || '').split('-')[0] || '',
     };
   }), [fb, batchById, trainersOf]);

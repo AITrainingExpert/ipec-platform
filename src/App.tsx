@@ -1,5 +1,6 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './lib/auth';
 import Login from './components/Login';
 import Layout from './components/Layout';
@@ -33,6 +34,7 @@ function Shell() {
 
   return (
     <Layout>
+      <BoundaryByRoute>
       <Routes>
         <Route path="/" element={isParticipant ? <ParticipantHome /> : <Navigate to={home} />} />
         <Route path="/report" element={isParticipant ? <MyReport /> : <Navigate to={home} />} />
@@ -59,8 +61,14 @@ function Shell() {
 
         <Route path="*" element={<Navigate to={home} />} />
       </Routes>
+      </BoundaryByRoute>
     </Layout>
   );
+}
+
+function BoundaryByRoute({ children }: { children: React.ReactNode }) {
+  const loc = useLocation();
+  return <ErrorBoundary resetKey={loc.pathname}>{children}</ErrorBoundary>;
 }
 
 export default function App() {

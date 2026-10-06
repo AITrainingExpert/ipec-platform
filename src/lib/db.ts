@@ -327,8 +327,8 @@ export async function getBatches(): Promise<Batch[]> {
 // Natural order: Junior Batch 1..8, then Senior Batch 1..10, then others.
 function sortBatches(bs: Batch[]): Batch[] {
   const rank = (b: Batch) => (b.track === 'junior' ? 0 : b.track === 'senior' ? 1 : 2);
-  const num = (b: Batch) => Number((b.name.match(/\d+/) || b.id.match(/\d+/) || ['999'])[0]);
-  return [...bs].sort((a, b) => rank(a) - rank(b) || num(a) - num(b) || a.name.localeCompare(b.name));
+  const num = (b: Batch) => Number((String(b.name || '').match(/\d+/) || String(b.id || '').match(/\d+/) || ['999'])[0]);
+  return [...bs].sort((a, b) => rank(a) - rank(b) || num(a) - num(b) || String(a.name || '').localeCompare(String(b.name || '')));
 }
 
 export async function addBatch(name: string, college: string, track?: Track) {
