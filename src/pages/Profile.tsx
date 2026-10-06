@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { getMyResults, getMyDrills } from '../lib/db';
 import { evaluateBadges } from '../lib/logic';
-import { DRILLS } from '../lib/drills';
+import { drillsFor } from '../lib/bank';
+import { useMyTrack } from '../lib/tracks';
 import { QuizResult, DrillResult } from '../types';
 
 const tierColor: Record<string, string> = {
@@ -16,6 +17,8 @@ export default function Profile() {
   const { user } = useAuth();
   const [results, setResults] = useState<QuizResult[]>([]);
   const [drills, setDrills] = useState<DrillResult[]>([]);
+  const { track } = useMyTrack();
+  const DRILLS = drillsFor(track);
 
   useEffect(() => {
     if (!user) return;

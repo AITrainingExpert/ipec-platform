@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { getBatches, getBatchResults, getBatchCertificates, generateCertificate,
-         getCertSettings, saveCertSettings } from '../lib/db';
-import { Batch, Certificate, CertSettings, QuizResult } from '../types';
+         getCertSettings, saveCertSettings, setCertRelease, getAllCertReleases } from '../lib/db';
+import { Batch, Certificate, CertSettings, QuizResult, Track } from '../types';
+import { trackOfBatch } from '../lib/tracks';
 
 export default function CertAdmin() {
   const { user } = useAuth();
@@ -16,12 +17,14 @@ export default function CertAdmin() {
   });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [releases, setReleases] = useState<Record<string, boolean>>({});
 
   const load = async () => {
     const [b, c, r, s] = await Promise.all([
       getBatches(), getBatchCertificates(batchId), getBatchResults(batchId), getCertSettings(batchId),
     ]);
     setBatches(b); setCerts(c); setResults(r);
+    setReleases(await getAllCertReleases());
     if (s) setSettings(s);
     else setSettings({ batchId, downloadEnabled: false, collegeLogoUrl: '',
       collegeSignatoryName: '', collegeSignatoryTitle: '', updatedAt: '' });
@@ -33,6 +36,16 @@ export default function CertAdmin() {
     await saveCertSettings({ ...settings, batchId, updatedAt: new Date().toISOString() });
     setMsg('Settings saved.'); setBusy(false);
   };
+
+  const release = async (ids: string[], enabled: boolean, label: string) => {
+    if (!ids.length) return;
+    if (enabled && !window.confirm(`Release certificate download for ${label}? Participants in ${ids.length} batch(es) will be able to download immediately.`)) return;
+    setBusy(true);
+    await setCertRelease(ids, enabled);
+    await load();
+    setMsg(`${enabled ? 'Released' : 'Locked'}: ${label}.`); setBusy(false);
+  };
+  const idsOf = (t: Track) => batches.filter(b => trackOfBatch(b) === t).map(b => b.id);
 
   const generateAll = async () => {
     setBusy(true); setMsg('');
@@ -72,6 +85,38 @@ export default function CertAdmin() {
         <select value={batchId} onChange={e => setBatchId(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
           {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
+      </div>
+
+      {/* Release control — certificates stay hidden from participants until released here */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h2 className="font-bold text-slate-800">Certificate Release</h2>
+            <p className="text-xs text-slate-500">Locked batches see no certificate at all (no preview, no download). Release each batch after Day 5.</p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button disabled={busy} onClick={() => release(idsOf('junior'), true, 'all Junior batches')} className="text-xs font-bold bg-emerald-600 text-white px-3 py-2 rounded-lg disabled:opacity-50">Release all Junior</button>
+            <button disabled={busy} onClick={() => release(idsOf('senior'), true, 'all Senior batches')} className="text-xs font-bold bg-emerald-600 text-white px-3 py-2 rounded-lg disabled:opacity-50">Release all Senior</button>
+            <button disabled={busy} onClick={() => release(batches.map(b => b.id), false, 'all batches')} className="text-xs font-bold border border-red-200 text-red-600 px-3 py-2 rounded-lg disabled:opacity-50">Lock all</button>
+          </div>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {batches.map(b => {
+            const on = !!releases[b.id];
+            return (
+              <div key={b.id} className={`flex items-center justify-between border rounded-lg px-3 py-2 ${on ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200'}`}>
+                <div>
+                  <div className="text-sm font-semibold text-slate-700">{b.name}</div>
+                  <div className="text-[10px] text-slate-400 capitalize">{trackOfBatch(b)} · {on ? 'released' : 'locked'}</div>
+                </div>
+                <button disabled={busy} onClick={() => release([b.id], !on, b.name)}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-lg ${on ? 'bg-white border border-red-200 text-red-600' : 'bg-emerald-600 text-white'}`}>
+                  {on ? '🔒 Lock' : '🔓 Release'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Settings panel */}
@@ -123,7 +168,7 @@ export default function CertAdmin() {
             <p className="text-[10px] text-slate-400 mt-1">Upload a scanned PNG/JPG of the signature. It will appear on the certificate.</p>
           </div>
           <div className="flex flex-col justify-end">
-            <label className="text-xs font-bold text-slate-500 mb-2">Download access for participants</label>
+            <label className="text-xs font-bold text-slate-500 mb-2">Download access for this batch (saved with “Save settings”)</label>
             <div className="flex items-center gap-3">
               <button onClick={() => setSettings(s => ({...s, downloadEnabled: !s.downloadEnabled}))}
                 className={`px-4 py-2 rounded-lg text-sm font-bold ${settings.downloadEnabled ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600'}`}>

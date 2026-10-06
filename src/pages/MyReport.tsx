@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
+import { useMyTrack } from '../lib/tracks';
 import { getMyResults, getMyDrills } from '../lib/db';
 import { analyzeSkillGap, recommendFor, conceptCoverage, comprehensiveScore, evaluateBadges, sessionQuizAvg } from '../lib/logic';
 
@@ -13,6 +14,7 @@ import { QuizResult, DrillResult } from '../types';
 
 export default function MyReport() {
   const { user } = useAuth();
+  const { track: myTrack } = useMyTrack();
   const [results, setResults] = useState<QuizResult[]>([]);
   const [drills, setDrills] = useState<DrillResult[]>([]);
   useEffect(() => {
@@ -40,7 +42,7 @@ export default function MyReport() {
   const quizSessionAvg = sessionQuizAvg(results);
   const consolidated = comprehensiveScore(quizSessionAvg, drillAvg, passedDrills.length, badges.length);
   // Concept coverage by track
-  const { track, coverage } = conceptCoverage(results, user?.year || '3rd');
+  const { track, coverage } = conceptCoverage(results, myTrack);
 
   const download = () => {
     const w = window.open('', '_blank');

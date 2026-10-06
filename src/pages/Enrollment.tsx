@@ -4,7 +4,10 @@ import {
   getBatches, getAllowedEmails, addAllowedEmails, removeAllowedEmail,
   setParticipantBlocked, parseQuestionCsv, addUploadedQuestions, getFeedback,
 } from '../lib/db';
-import { Batch, AllowedEmail, Feedback } from '../types';
+import { Batch, AllowedEmail, Track } from '../types';
+import TrainerFeedbackReport from '../components/TrainerFeedbackReport';
+import { cachedBatches, trackOfBatch } from '../lib/tracks';
+import { sessionTopics, TRACK_LABEL } from '../lib/bank';
 
 export default function Enrollment() {
   const { user, loading: authLoading } = useAuth();
@@ -44,7 +47,7 @@ export default function Enrollment() {
       <div className="flex gap-2 flex-wrap">
         {canEnroll && <TabBtn on={tab === 'emails'} onClick={() => setTab('emails')}>Enroll Students</TabBtn>}
         <TabBtn on={tab === 'questions'} onClick={() => setTab('questions')}>Upload Questions</TabBtn>
-        <TabBtn on={tab === 'feedback'} onClick={() => setTab('feedback')}>Feedback Export</TabBtn>
+        <TabBtn on={tab === 'feedback'} onClick={() => setTab('feedback')}>Trainer Feedback</TabBtn>
       </div>
 
       <div className="flex items-center gap-3">
@@ -58,7 +61,7 @@ export default function Enrollment() {
 
       {tab === 'emails' && canEnroll && <Emails batchId={batchId} addedBy={user!.name} />}
       {tab === 'questions' && <Questions batchId={batchId} />}
-      {tab === 'feedback' && <FeedbackExport batchId={batchId} isAdmin={isAdmin} />}
+      {tab === 'feedback' && <TrainerFeedbackReport batchId={batchId} isAdmin={isAdmin} />}
     </div>
   );
 }
@@ -71,8 +74,8 @@ function Emails({ batchId, addedBy }: { batchId: string; addedBy: string }) {
   const [text, setText] = useState('');
   const [list, setList] = useState<AllowedEmail[]>([]);
   const [msg, setMsg] = useState('');
-  const load = () => getAllowedEmails(batchId).then(setList);
-  useEffect(load, [batchId]);
+  const load = () => { getAllowedEmails(batchId).then(setList); };
+  useEffect(() => { load(); }, [batchId]);
 
   const upload = async () => {
     const emails = text.split(/[\s,;\n]+/).map(e => e.trim()).filter(e => e.includes('@'));
@@ -117,74 +120,77 @@ function Emails({ batchId, addedBy }: { batchId: string; addedBy: string }) {
 
 function Questions({ batchId }: { batchId: string }) {
   const [csv, setCsv] = useState('');
-  const [msg, setMsg] = useState('');
-  const template = 'section,day,level,question,optionA,optionB,optionC,optionD,answer\nAPT,1,I,"If 3 pens cost 45, cost of 7 pens?","95","105","115","120",B\nRSN,1,I,"Find the odd one out","Square","Circle","Triangle","Cube",D';
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [track, setTrack] = useState<Track>('senior');
+  const [day, setDay] = useState(1);
+  const [slot, setSlot] = useState<'Morning' | 'Afternoon'>('Morning');
+  const [busy, setBusy] = useState(false);
+
+  // Default the track to the selected batch's track
+  useEffect(() => { cachedBatches().then(bs => setTrack(trackOfBatch(bs.find(b => b.id === batchId)))); }, [batchId]);
+
+  const template = [
+    'track,day,session,topic,level,question,optionA,optionB,optionC,optionD,answer',
+    'senior,2,Morning,Quant Basics,I,"A shirt marked Rs 800 is sold at 15% discount. Selling price?",Rs 640,Rs 680,Rs 700,Rs 720,B',
+    'junior,4,Morning,Logical Reasoning Playground,B,"Find the next number: 3, 6, 12, 24, ?",30,36,48,42,C',
+  ].join('\n');
 
   const upload = async () => {
-    const qs = parseQuestionCsv(csv);
-    if (qs.length === 0) { setMsg('No valid rows found. Check the format matches the template.'); return; }
-    const n = await addUploadedQuestions(qs);
-    setMsg(`${n} question(s) added. They now appear in quizzes (shuffled with the rest).`); setCsv('');
+    const { questions, skipped } = parseQuestionCsv(csv, { track, slot });
+    // rows in the old 9-column format take the day from the CSV; new rows carry everything
+    setSkipped(skipped);
+    if (questions.length === 0) { setMsg({ ok: false, text: 'No valid rows found. Check the format matches the template.' }); return; }
+    setBusy(true);
+    const r = await addUploadedQuestions(questions);
+    setBusy(false);
+    setMsg({ ok: r.ok, text: r.ok ? `${r.count} question(s) added. They join only their own track / day / session pool and shuffle with the syllabus questions.` : r.msg });
+    if (r.ok) setCsv('');
   };
 
   const downloadTemplate = () => {
-    const blob = new Blob([template], { type: 'text/csv' });
+    const blob = new Blob(['\uFEFF' + template], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'question_template.csv'; a.click();
   };
 
+  const topics = sessionTopics(track, day, slot);
+  const sel = 'border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm bg-white';
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="font-bold text-slate-800">Upload Aptitude / Reasoning questions</h2>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="font-bold text-slate-800">Add syllabus questions</h2>
         <button onClick={downloadTemplate} className="text-sm font-semibold text-brand border border-indigo-200 rounded-lg px-3 py-1.5">Download CSV template</button>
       </div>
-      <p className="text-xs text-slate-500">Columns: section, day, level (B/I/A), question, optionA–D, answer (A/B/C/D). Use section APT for Aptitude, RSN for Reasoning. Paste your filled CSV below.</p>
+      <p className="text-xs text-slate-500">
+        Columns: <code>track, day, session, topic, level (B/I/A), question, optionA–D, answer (A/B/C/D)</code>.
+        Every question must belong to a track, a day (1–5) and a session (Morning/Afternoon) — it is only ever asked in that session's quiz
+        and in the Full Bootcamp. Rows in the old 9-column format use the track and session chosen below.
+      </p>
+      <div className="flex flex-wrap gap-2 items-center bg-slate-50 rounded-lg p-3">
+        <span className="text-xs font-semibold text-slate-500">Syllabus topics for:</span>
+        <select className={sel} value={track} onChange={e => setTrack(e.target.value as Track)}>
+          <option value="junior">{TRACK_LABEL.junior}</option><option value="senior">{TRACK_LABEL.senior}</option>
+        </select>
+        <select className={sel} value={day} onChange={e => setDay(Number(e.target.value))}>
+          {[1, 2, 3, 4, 5].map(d => <option key={d} value={d}>Day {d}</option>)}
+        </select>
+        <select className={sel} value={slot} onChange={e => setSlot(e.target.value as any)}>
+          <option>Morning</option><option>Afternoon</option>
+        </select>
+        <div className="w-full flex flex-wrap gap-1 mt-1">
+          {topics.map(t => <span key={t} className="text-[11px] bg-white border border-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{t}</span>)}
+        </div>
+      </div>
       <textarea value={csv} onChange={e => setCsv(e.target.value)} rows={10} className="w-full border border-slate-200 rounded-lg p-3 text-sm font-mono" placeholder={template} />
-      <button onClick={upload} className="w-full bg-brand text-white font-bold py-2.5 rounded-lg">Add questions to quiz bank</button>
-      {msg && <p className="text-center text-xs text-emerald-600">{msg}</p>}
+      <button onClick={upload} disabled={busy || !csv.trim()} className="w-full bg-brand text-white font-bold py-2.5 rounded-lg disabled:opacity-50">{busy ? 'Uploading…' : 'Add questions to the syllabus bank'}</button>
+      {msg && <p className={`text-center text-xs ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>{msg.text}</p>}
+      {skipped.length > 0 && (
+        <div className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2.5 max-h-32 overflow-y-auto">
+          <p className="font-bold mb-1">{skipped.length} row(s) skipped:</p>
+          {skipped.slice(0, 30).map(x => <div key={x}>{x}</div>)}
+        </div>
+      )}
     </div>
   );
-}
-
-function FeedbackExport({ batchId, isAdmin }: { batchId: string; isAdmin: boolean }) {
-  const [fb, setFb] = useState<Feedback[]>([]);
-  useEffect(() => { getFeedback(isAdmin ? undefined : batchId).then(setFb); }, [batchId, isAdmin]);
-
-  const avg = (k: keyof Feedback) => fb.length ? (fb.reduce((s, f) => s + (Number(f[k]) || 0), 0) / fb.length).toFixed(1) : '-';
-
-  const exportCsv = () => {
-    const head = 'Session,Name,Programme,Trainer,Interactivity,Engagement,Different,Comments,Date\n';
-    const rows = fb.map(f => `${f.sessionKey},${f.userName},${f.ratingProgram},${f.ratingTrainer},${f.ratingInteractivity},${f.ratingEngagement},${f.ratingDifferent},"${(f.comments || '').replace(/"/g, '""')}",${f.createdAt}`).join('\n');
-    const blob = new Blob([head + rows], { type: 'text/csv' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'feedback.csv'; a.click();
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <Stat label="Programme" v={avg('ratingProgram')} />
-        <Stat label="Trainer" v={avg('ratingTrainer')} />
-        <Stat label="Interactivity" v={avg('ratingInteractivity')} />
-        <Stat label="Engagement" v={avg('ratingEngagement')} />
-        <Stat label="Different" v={avg('ratingDifferent')} />
-      </div>
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">{fb.length} response(s) collected.</p>
-        <button onClick={exportCsv} disabled={fb.length === 0} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50">Download Feedback CSV</button>
-      </div>
-      <div className="bg-white border border-slate-200 rounded-xl p-4 max-h-96 overflow-y-auto">
-        {fb.length === 0 && <p className="text-sm text-slate-400">No feedback yet.</p>}
-        {fb.map(f => (
-          <div key={f.id} className="border-b border-slate-100 py-2">
-            <div className="flex justify-between text-xs text-slate-500"><span className="font-semibold text-slate-700">{f.userName}</span><span>{f.sessionKey}</span></div>
-            {f.comments && <p className="text-sm text-slate-600 mt-1">“{f.comments}”</p>}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Stat({ label, v }: { label: string; v: any }) {
-  return <div className="bg-white border border-slate-200 rounded-xl p-3 text-center"><div className="text-xl font-extrabold text-brand">{v}</div><div className="text-[11px] text-slate-500">{label}</div></div>;
 }

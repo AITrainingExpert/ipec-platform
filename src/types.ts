@@ -13,17 +13,23 @@ export interface User {
   createdAt: string;
 }
 
+export type Track = 'junior' | 'senior';
+
 export interface Batch {
   id: string;
   name: string;
   college: string;
   trainerId?: string;
+  track?: Track;        // Junior Champions / Senior Champions
   createdAt: string;
 }
 
 export interface Question {
   id: string;
-  section: string;      // 'A'..'F'
+  section: string;      // syllabus topic (shown as a focus area when missed)
+  topic?: string;       // syllabus module / topic
+  track?: Track;        // junior | senior
+  slot?: 'Morning' | 'Afternoon';
   day: number;          // 1..5
   level: 'B' | 'I' | 'A';
   text: string;
@@ -38,7 +44,7 @@ export interface QuizResult {
   batchId?: string;
   day: number | 'all';
   sessionSlot?: 'Morning' | 'Afternoon' | 'Full';  // which session
-  activityType?: 'Quiz' | 'Bootcamp';               // type of activity
+  activityType?: string;   // 'Quiz-Morning' / 'Quiz-Afternoon' / 'Bootcamp'
   attemptNumber?: number;                            // 1, 2, or 3
   score: number;
   total: number;

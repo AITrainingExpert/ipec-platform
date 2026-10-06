@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { getQuestions, saveResult, getSessionLocks, countAttempts, getAttemptLimit, getBestScores } from '../lib/db';
-import { pickQuiz } from '../lib/questions';
+import { pickQuiz, sessionPool, getSeen, addSeen } from '../lib/questions';
+import { useMyTrack } from '../lib/tracks';
+import { TRACK_LABEL, sessionTopics, dayTitle } from '../lib/bank';
+import { Track } from '../types';
 import { scoreQuiz } from '../lib/logic';
 import { useAuth } from '../lib/auth';
 import { Question, QuizResult } from '../types';
@@ -17,7 +20,8 @@ export default function Quiz() {
   const day: number | 'all' = dayParam === 'all' ? 'all' : Number(dayParam);
   // Each Morning/Afternoon is tracked separately as Quiz-Morning / Quiz-Afternoon
   const activityType: string = day === 'all' ? 'Bootcamp' : slotParam ? `Quiz-${slotParam}` : 'Quiz';
-  const displaySlot = slotParam || (day === 'all' ? 'Full' : 'Full');
+  const trackParam = params.get('track') as Track | null;
+  const { track, loading: trackLoading } = useMyTrack(trackParam === 'junior' || trackParam === 'senior' ? trackParam : null);
 
   const [all, setAll] = useState<Question[]>([]);
   const [quiz, setQuiz] = useState<Question[]>([]);
@@ -56,8 +60,11 @@ export default function Quiz() {
     });
   }, [user, day]);
 
-  const dayUnlocked = isStaff || day === 'all'
+  // Full Bootcamp = the Day 5 Afternoon "Grand Quiz Arena" in the syllabus.
+  const dayUnlocked = isStaff
     ? true
+    : day === 'all'
+    ? Boolean(locks['5-Afternoon'])
     : slotParam
       ? Boolean(locks[`${day}-${slotParam}`])
       : Boolean(locks[`${day}-Morning`] || locks[`${day}-Afternoon`]);
@@ -68,8 +75,16 @@ export default function Quiz() {
   const attemptsLeft = maxAttempts - attemptCount;
   const limitReached = !isStaff && attemptsLeft <= 0;
 
+  const quizSlot: 'Morning' | 'Afternoon' | null = slotParam || (activeSlot === 'Full' ? null : activeSlot);
+  const seenKey = `${track}-${day}-${quizSlot || 'all'}`;
+  const poolSize = day === 'all' ? all.filter(q => q.track === track).length : sessionPool(all, track, day as number, quizSlot).length;
+  const topics = day === 'all' ? [] : quizSlot ? sessionTopics(track, day as number, quizSlot)
+    : [...sessionTopics(track, day as number, 'Morning'), ...sessionTopics(track, day as number, 'Afternoon')];
+
   const begin = () => {
-    const q = pickQuiz(all, day, QUIZ_SIZE);
+    const avoid = user ? getSeen(user.id, seenKey) : new Set<string>();
+    const q = pickQuiz(all, { track, day, slot: quizSlot, count: QUIZ_SIZE, avoid });
+    if (user && q.length) addSeen(user.id, seenKey, q.map(x => x.id));
     setQuiz(q); setAnswers({}); setIdx(0); setSubmitted(false); setResult(null);
     setTimeLeft(q.length * SECONDS_PER_Q); setStarted(true);
   };
@@ -104,14 +119,16 @@ export default function Quiz() {
   const mm = String(Math.floor(timeLeft / 60)).padStart(2, '0');
   const ss = String(timeLeft % 60).padStart(2, '0');
 
-  if (loading) return <div className="text-center py-16 text-slate-400">Loading quiz...</div>;
+  if (loading || trackLoading) return <div className="text-center py-16 text-slate-400">Loading quiz...</div>;
 
   // Session locked
   if (!started && !dayUnlocked) return (
     <div className="max-w-lg mx-auto bg-white border border-slate-200 rounded-2xl p-8 text-center">
       <div className="text-4xl">🔒</div>
-      <h1 className="text-xl font-extrabold text-slate-800 mt-2">Day {day} {slotParam || ''} is locked</h1>
-      <p className="text-slate-500 text-sm mt-2">Your trainer hasn't activated this session yet.</p>
+      <h1 className="text-xl font-extrabold text-slate-800 mt-2">{day === 'all' ? 'Full Bootcamp Assessment is locked' : `Day ${day} ${slotParam || ''} is locked`}</h1>
+      <p className="text-slate-500 text-sm mt-2">{day === 'all'
+        ? 'The Grand Quiz opens when your trainer activates the Day 5 Afternoon session.'
+        : "Your trainer hasn't activated this session yet."}</p>
       <Link to="/" className="inline-block mt-5 text-sm font-semibold text-brand">← Back to Home</Link>
     </div>
   );
@@ -142,17 +159,27 @@ export default function Quiz() {
   // Pre-quiz start screen
   if (!started) return (
     <div className="max-w-lg mx-auto bg-white border border-slate-200 rounded-2xl p-8 text-center">
-      <h1 className="text-xl font-extrabold text-slate-800">
-        {day === 'all' ? 'Full Bootcamp Assessment' : `Day ${day} ${slotParam ? slotParam + ' Session' : ''} Quiz`}
+      <p className="text-[11px] font-bold text-brand uppercase tracking-wide">{TRACK_LABEL[track]}</p>
+      <h1 className="text-xl font-extrabold text-slate-800 mt-1">
+        {day === 'all' ? 'Full Bootcamp Assessment' : `Day ${day} ${quizSlot ? quizSlot + ' Session' : ''} Quiz`}
       </h1>
-      {slotParam && <p className="text-xs font-bold text-indigo-600 mt-1">{slotParam === 'Morning' ? '☀' : '🌙'} {slotParam} Session</p>}
-      <p className="text-slate-500 text-sm mt-2">{QUIZ_SIZE} shuffled questions · {SECONDS_PER_Q}s each · auto-scored.</p>
+      {day !== 'all' && <p className="text-xs text-slate-500 mt-1">{dayTitle(track, day as number)}</p>}
+      {quizSlot && day !== 'all' && <p className="text-xs font-bold text-indigo-600 mt-1">{quizSlot === 'Morning' ? '☀' : '🌙'} {quizSlot} Session</p>}
+      {topics.length > 0 && (
+        <div className="flex flex-wrap justify-center gap-1 mt-3">
+          {topics.map(t => <span key={t} className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">{t}</span>)}
+        </div>
+      )}
+      <p className="text-slate-500 text-sm mt-3">{QUIZ_SIZE} shuffled questions · {SECONDS_PER_Q}s each · auto-scored.</p>
+      {day === 'all' && <p className="text-xs text-slate-400 mt-1">One question from every Morning and Afternoon session of Days 1–5.</p>}
 
       {/* Attempt info */}
       {!isStaff && (
-        <div className={`mt-3 inline-block text-xs font-bold px-3 py-1.5 rounded-full ${attemptsLeft <= 1 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-          Attempt {attemptCount + 1} of {maxAttempts}
-          {attemptsLeft <= 1 && attemptCount > 0 ? ' — Last chance' : ''}
+        <div className="mt-3">
+          <span className={`inline-block text-xs font-bold px-3 py-1.5 rounded-full ${attemptsLeft <= 1 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+            Attempt {attemptCount + 1} of {maxAttempts}
+            {attemptsLeft <= 1 && attemptCount > 0 ? ' — Last chance' : ''}
+          </span>
         </div>
       )}
 
@@ -164,15 +191,25 @@ export default function Quiz() {
         </div>
       )}
 
-      <ul className="text-xs text-slate-500 mt-4 space-y-1 text-left inline-block">
+      <ul className="text-xs text-slate-500 mt-4 space-y-1 text-left inline-block mx-auto">
         <li>• Questions and options are shuffled every attempt.</li>
         <li>• Timer auto-submits when it reaches zero.</li>
         <li>• Your <strong>best score</strong> across attempts is used in your report.</li>
       </ul>
-      <button onClick={begin} disabled={all.length === 0}
+      {isStaff && (
+        <div className="mt-4 flex justify-center gap-1 text-xs">
+          <span className="text-slate-400 self-center">Preview track:</span>
+          {(['junior', 'senior'] as Track[]).map(t => (
+            <Link key={t} to={`/quiz?day=${dayParam}${quizSlot ? `&slot=${quizSlot}` : ''}&track=${t}`}
+              className={`px-2 py-1 rounded-md font-bold ${track === t ? 'bg-brand text-white' : 'bg-slate-100 text-slate-600'}`}>{TRACK_LABEL[t]}</Link>
+          ))}
+        </div>
+      )}
+      <button onClick={begin} disabled={poolSize === 0}
         className="mt-6 w-full bg-brand hover:bg-brand-dark text-white font-bold py-2.5 rounded-lg disabled:opacity-50">
-        Start {activityType}
+        {day === 'all' ? 'Start Full Bootcamp' : 'Start Quiz'}
       </button>
+      {poolSize === 0 && <p className="text-xs text-red-600 mt-2">No questions found for this session.</p>}
     </div>
   );
 

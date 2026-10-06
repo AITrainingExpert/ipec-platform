@@ -1,5 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { DRILLS, Drill } from '../lib/drills';
+import React, { useEffect, useMemo, useState } from 'react';
+import { drillsFor, ArenaDrill as Drill, TRACK_LABEL } from '../lib/bank';
+import { shuffle } from '../lib/questions';
+import { useMyTrack } from '../lib/tracks';
+import { Track } from '../types';
 import { saveDrillResult, getMyDrills, getSessionLocks } from '../lib/db';
 import { useAuth } from '../lib/auth';
 import { DrillResult } from '../types';
@@ -17,6 +20,9 @@ export default function DrillsArena() {
   const [done, setDone] = useState<DrillResult[]>([]);
   const [locks, setLocks] = useState<Record<string, boolean>>({});
   const isStaff = user?.role === 'trainer' || user?.role === 'admin';
+  const [preview, setPreview] = useState<Track | null>(null);
+  const { track } = useMyTrack(preview);
+  const DRILLS = drillsFor(track);
 
   const load = () => {
     if (user) {
@@ -27,7 +33,8 @@ export default function DrillsArena() {
   useEffect(load, [user]);
 
   const totalXp = done.filter(d => d.passed).reduce((s, d) => s + d.xpEarned, 0);
-  const earned = new Set(done.filter(d => d.passed).map(d => d.drillId));
+  const trackIds = new Set(DRILLS.map(d => d.id));
+  const earned = new Set(done.filter(d => d.passed && trackIds.has(d.drillId)).map(d => d.drillId));
   const shown = filter === 'all' ? DRILLS : DRILLS.filter(d => d.day === filter);
 
   // Check if any session is active at all (for participants)
@@ -48,6 +55,7 @@ export default function DrillsArena() {
   return (
     <div className="space-y-5">
       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl p-6">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-indigo-200">{TRACK_LABEL[track]}</p>
         <h1 className="text-2xl font-extrabold">Gamified Activity Arena 🏆</h1>
         <p className="text-indigo-100 text-sm mt-1">Complete morning & afternoon drills across all 5 days. Score above the bar to unlock Gold and Platinum badges.</p>
         <div className="flex gap-4 mt-4">
@@ -55,6 +63,15 @@ export default function DrillsArena() {
           <div className="bg-white/15 rounded-lg px-4 py-2"><div className="text-xl font-extrabold">{totalXp} XP</div><div className="text-[11px] text-indigo-100">Total experience</div></div>
         </div>
       </div>
+
+      {isStaff && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500 font-semibold">Preview track:</span>
+          {(['junior', 'senior'] as Track[]).map(t => (
+            <button key={t} onClick={() => setPreview(t)} className={`px-2.5 py-1 rounded-md font-bold ${track === t ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>{TRACK_LABEL[t]}</button>
+          ))}
+        </div>
+      )}
 
       <div className="flex gap-2 flex-wrap">
         {(['all', 1, 2, 3, 4, 5] as const).map(d => (
@@ -106,8 +123,13 @@ function DrillRunner({ drill, onDone }: { drill: Drill; onDone: () => void }) {
   const [finished, setFinished] = useState(false);
   const [result, setResult] = useState<{ pct: number; passed: boolean } | null>(null);
 
-  const q = drill.questions[idx];
-  const isLast = idx === drill.questions.length - 1;
+  // Fresh order every run: questions AND options shuffled (answer key kept correct).
+  const questions = useMemo(() => shuffle(drill.questions).map(q => {
+    const order = shuffle(q.options.map((_, i) => i));
+    return { ...q, options: order.map(i => q.options[i]), answer: order.indexOf(q.answer) };
+  }), [drill]);
+  const q = questions[idx];
+  const isLast = idx === questions.length - 1;
 
   const choose = (i: number) => { if (revealed) return; setPicked(i); };
   const check = () => {
@@ -117,7 +139,7 @@ function DrillRunner({ drill, onDone }: { drill: Drill; onDone: () => void }) {
   };
   const next = async () => {
     if (!isLast) { setIdx(idx + 1); setPicked(null); setRevealed(false); return; }
-    const total = drill.questions.length;
+    const total = questions.length;
     const finalCorrect = correct + (picked === q.answer && revealed ? 0 : 0);
     const pct = Math.round((finalCorrect / total) * 100);
     const passed = pct >= drill.passScore;
@@ -162,10 +184,10 @@ function DrillRunner({ drill, onDone }: { drill: Drill; onDone: () => void }) {
     <div className="max-w-2xl mx-auto">
       <div className="flex items-center justify-between mb-2">
         <span className="text-[11px] font-bold text-brand">DAY {drill.day} · {drill.session.toUpperCase()}</span>
-        <span className="text-xs text-slate-500">Question {idx + 1} of {drill.questions.length}</span>
+        <span className="text-xs text-slate-500">Question {idx + 1} of {questions.length}</span>
       </div>
       <h2 className="font-extrabold text-slate-800 mb-3">{drill.title}</h2>
-      <div className="h-1.5 bg-slate-200 rounded-full mb-4"><div className="h-1.5 bg-brand rounded-full transition-all" style={{ width: `${((idx + 1) / drill.questions.length) * 100}%` }} /></div>
+      <div className="h-1.5 bg-slate-200 rounded-full mb-4"><div className="h-1.5 bg-brand rounded-full transition-all" style={{ width: `${((idx + 1) / questions.length) * 100}%` }} /></div>
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <p className="text-[11px] font-bold text-brand mb-2">SIMULATED DRILL CHALLENGE #{idx + 1}</p>
         <p className="font-bold text-slate-800 mb-4">{q.text}</p>

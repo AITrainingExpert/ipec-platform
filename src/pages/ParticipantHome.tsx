@@ -4,14 +4,8 @@ import { useAuth } from '../lib/auth';
 import { getMyResults, getMyDrills, getSessionLocks, countAttempts, getAttemptLimit } from '../lib/db';
 import { analyzeSkillGap, evaluateBadges, sessionQuizAvg, comprehensiveScore } from '../lib/logic';
 import { QuizResult } from '../types';
-
-const DAYS = [
-  { day: 1, title: 'Mindset & Confidence', desc: 'Growth mindset, box breathing, Answer-to-Fear' },
-  { day: 2, title: 'Communication & English', desc: 'Grammar, listening, professional messaging' },
-  { day: 3, title: 'Speaking, Storytelling & Resume', desc: 'PREP, STAR, ATS resume' },
-  { day: 4, title: 'Thinking, Teamwork & GD', desc: '5 Whys, fact-checking, group discussion' },
-  { day: 5, title: 'Interview & Etiquette', desc: 'TMAY, HR questions, follow-up' },
-];
+import { useMyTrack } from '../lib/tracks';
+import { TRACK_LABEL, dayTitle, sessionTopics } from '../lib/bank';
 
 export default function ParticipantHome() {
   const { user } = useAuth();
@@ -21,6 +15,8 @@ export default function ParticipantHome() {
   const [locks, setLocks] = useState<Record<string, boolean>>({});
   const [attemptCounts, setAttemptCounts] = useState<Record<string, number>>({});
   const [maxAttempts, setMaxAttempts] = useState(2);
+  const { track } = useMyTrack();
+  const DAYS = [1, 2, 3, 4, 5].map(day => ({ day, title: dayTitle(track, day) }));
 
   useEffect(() => {
     if (!user) return;
@@ -63,6 +59,7 @@ export default function ParticipantHome() {
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-r from-brand to-indigo-500 text-white rounded-2xl p-6">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-indigo-200">{TRACK_LABEL[track]}</p>
         <h1 className="text-2xl font-extrabold">Welcome, {user?.name?.split(' ')[0]} 👋</h1>
         <p className="text-indigo-100 text-sm mt-1">Complete each day's quiz, track your growth, and close your skill gaps — all free.</p>
         <div className="flex flex-wrap gap-4 mt-4">
@@ -91,7 +88,6 @@ export default function ParticipantHome() {
                   <span className="text-xs font-extrabold text-brand bg-indigo-50 px-2 py-1 rounded">DAY {d.day}</span>
                   <div>
                     <p className="font-bold text-slate-800 text-sm">{d.title}</p>
-                    <p className="text-xs text-slate-500">{d.desc}</p>
                   </div>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-2">
@@ -115,6 +111,7 @@ export default function ParticipantHome() {
                             {done && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">✓ {score}%</span>}
                           </div>
                         </div>
+                        <p className="text-[10px] text-slate-500 mb-2 leading-snug">{sessionTopics(track, d.day, slot).join(' · ')}</p>
                         {attempts > 0 && (
                           <p className={`text-[10px] mb-2 ${limitReached ? 'text-red-600 font-semibold' : 'text-slate-400'}`}>
                             {limitReached ? `⚠ ${maxAttempts}/${maxAttempts} attempts used` : `${attempts}/${maxAttempts} attempts · ${attemptsLeft} left`}
@@ -139,9 +136,10 @@ export default function ParticipantHome() {
               </div>
             );
           })}
-          <Link to="/quiz?day=all" className="block bg-slate-800 text-white rounded-xl p-4 hover:bg-slate-900 transition">
-            <span className="text-xs font-bold text-indigo-300">FULL BOOTCAMP</span>
-            <h3 className="font-bold mt-1 text-sm">Complete Assessment — Mixed questions from all days</h3>
+          <Link to="/quiz?day=all" className={`block rounded-xl p-4 transition ${locks['5-Afternoon'] ? 'bg-slate-800 text-white hover:bg-slate-900' : 'bg-slate-100 text-slate-500'}`}>
+            <span className={`text-xs font-bold ${locks['5-Afternoon'] ? 'text-indigo-300' : 'text-slate-400'}`}>FULL BOOTCAMP · GRAND QUIZ {locks['5-Afternoon'] ? '' : '🔒'}</span>
+            <h3 className="font-bold mt-1 text-sm">Complete Assessment — one question from every session of Days 1–5</h3>
+            {!locks['5-Afternoon'] && <p className="text-[11px] mt-1">Opens with the Day 5 Afternoon session.</p>}
           </Link>
         </div>
       </div>

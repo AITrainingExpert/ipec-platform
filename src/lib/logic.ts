@@ -140,8 +140,11 @@ export const SENIOR_CONCEPTS: Record<string, { label: string; weight: number }> 
 };
 
 // Concept-wise breakdown per participant
-export function conceptCoverage(results: QuizResult[], year: string) {
-  const isJunior = ['1st','2nd','first','second'].some(y => (year||'').toLowerCase().includes(y));
+// `yearOrTrack` = 'junior' | 'senior' (preferred, from the batch) or a year like '2nd'.
+export function conceptCoverage(results: QuizResult[], yearOrTrack: string) {
+  const v = (yearOrTrack || '').toLowerCase();
+  const isJunior = v === 'junior' ? true : v === 'senior' ? false
+    : ['1st','2nd','first','second'].some(y => v.includes(y));
   const map = isJunior ? JUNIOR_CONCEPTS : SENIOR_CONCEPTS;
   const track = isJunior ? 'Junior Champion' : 'Senior Champion';
 

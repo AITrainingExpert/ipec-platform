@@ -1,6 +1,6 @@
 import { supabase, HAS_SUPABASE, SHEETS_WEBHOOK } from './supabase';
-import { User, Batch, Question, QuizResult, Role, DrillResult, AllowedEmail, SessionLock, Feedback } from '../types';
-import { SEED_QUESTIONS } from './questions';
+import { User, Batch, Question, QuizResult, Role, DrillResult, AllowedEmail, SessionLock, Feedback, Track } from '../types';
+import { BUILT_IN_QUESTIONS } from './bank';
 
 // ============================================================
 // DATA LAYER
@@ -34,12 +34,14 @@ export function ensureSeed() {
   }
   if (!localStorage.getItem(LS.batches)) {
     const bs: Batch[] = [];
-    for (let i = 1; i <= 5; i++) {
-      bs.push({ id: `batch-${i}`, name: `Batch ${i}`, college: 'Your College', trainerId: `trainer-${i}`, createdAt: new Date().toISOString() });
+    for (let i = 1; i <= 8; i++) {
+      bs.push({ id: `batch-${i}`, name: `Junior Batch ${i}`, college: 'Your College', track: 'junior', createdAt: new Date().toISOString() });
+    }
+    for (let i = 1; i <= 10; i++) {
+      bs.push({ id: `sr-${i}`, name: `Senior Batch ${i}`, college: 'Your College', track: 'senior', createdAt: new Date().toISOString() });
     }
     write(LS.batches, bs);
   }
-  if (!localStorage.getItem(LS.questions)) write(LS.questions, SEED_QUESTIONS);
 }
 
 // ---- AUTH ----
@@ -183,16 +185,34 @@ export async function signOut() {
 }
 
 // ---- QUESTIONS ----
-export async function getQuestions(): Promise<Question[]> {
+// Built-in syllabus bank (Junior + Senior, Day 1-5, Morning/Afternoon)
+// + trainer-uploaded questions. Uploaded rows count ONLY when they carry a
+// track, day and session, so nothing outside the day-wise syllabus slips in.
+function validUploaded(q: Question): boolean {
+  return (q.track === 'junior' || q.track === 'senior') &&
+    q.day >= 1 && q.day <= 5 &&
+    (q.slot === 'Morning' || q.slot === 'Afternoon') &&
+    Array.isArray(q.options) && q.options.length >= 2 && typeof q.answer === 'number';
+}
+
+export async function getUploadedQuestions(): Promise<Question[]> {
   if (HAS_SUPABASE && supabase) {
-    const { data } = await supabase.from('questions').select('*');
-    if (data && data.length) return data.map((q: any) => ({
-      id: q.id, section: q.section, day: q.day, level: q.level, text: q.text,
-      options: q.options, answer: q.answer,
-    }));
-    return SEED_QUESTIONS;
+    const { data, error } = await supabase.from('questions').select('*').not('track', 'is', null);
+    if (error || !data) return [];
+    return data.map((q: any) => ({
+      id: q.id, section: q.topic || q.section, topic: q.topic || q.section, track: q.track, slot: q.slot,
+      day: Number(q.day), level: q.level, text: q.text, options: q.options, answer: q.answer,
+    })).filter(validUploaded);
   }
-  return [...read<Question[]>(LS.questions, SEED_QUESTIONS), ...read<Question[]>(LS.uploadedQ, [])];
+  return read<Question[]>(LS.uploadedQ, []).filter(validUploaded);
+}
+
+let qCache: Promise<Question[]> | null = null;
+export async function getQuestions(refresh = false): Promise<Question[]> {
+  if (!qCache || refresh) {
+    qCache = getUploadedQuestions().then(up => [...BUILT_IN_QUESTIONS, ...up]).catch(() => BUILT_IN_QUESTIONS);
+  }
+  return qCache;
 }
 
 // ---- RESULTS ----
@@ -298,16 +318,39 @@ export async function getUsers(): Promise<User[]> {
 export async function getBatches(): Promise<Batch[]> {
   if (HAS_SUPABASE && supabase) {
     const { data } = await supabase.from('batches').select('*');
-    return (data || []).map((b: any) => ({ id: b.id, name: b.name, college: b.college, trainerId: b.trainer_id, createdAt: b.created_at }));
+    return sortBatches((data || []).map((b: any) => ({ id: b.id, name: b.name, college: b.college, trainerId: b.trainer_id,
+      track: b.track === 'junior' || b.track === 'senior' ? b.track : undefined, createdAt: b.created_at })));
   }
-  return read<Batch[]>(LS.batches, []);
+  return sortBatches(read<Batch[]>(LS.batches, []));
 }
 
-export async function addBatch(name: string, college: string) {
-  const b: Batch = { id: uid(), name, college, createdAt: new Date().toISOString() };
-  if (HAS_SUPABASE && supabase) await supabase.from('batches').insert({ id: b.id, name, college, created_at: b.createdAt });
+// Natural order: Junior Batch 1..8, then Senior Batch 1..10, then others.
+function sortBatches(bs: Batch[]): Batch[] {
+  const rank = (b: Batch) => (b.track === 'junior' ? 0 : b.track === 'senior' ? 1 : 2);
+  const num = (b: Batch) => Number((b.name.match(/\d+/) || b.id.match(/\d+/) || ['999'])[0]);
+  return [...bs].sort((a, b) => rank(a) - rank(b) || num(a) - num(b) || a.name.localeCompare(b.name));
+}
+
+export async function addBatch(name: string, college: string, track?: Track) {
+  const b: Batch = { id: uid(), name, college, track, createdAt: new Date().toISOString() };
+  if (HAS_SUPABASE && supabase) {
+    const { error } = await supabase.from('batches').insert({ id: b.id, name, college, track: track || null, created_at: b.createdAt });
+    if (error) await supabase.from('batches').insert({ id: b.id, name, college, created_at: b.createdAt });
+  }
   else { const all = read<Batch[]>(LS.batches, []); all.push(b); write(LS.batches, all); }
   return b;
+}
+
+export async function setBatchTrack(batchId: string, track: Track): Promise<{ ok: boolean; msg: string }> {
+  if (HAS_SUPABASE && supabase) {
+    const { error } = await supabase.from('batches').update({ track }).eq('id', batchId);
+    if (error) return { ok: false, msg: error.message.includes('track') ? 'Run upgrade_tracks.sql in Supabase first (adds the track column).' : error.message };
+    return { ok: true, msg: 'Saved' };
+  }
+  const all = read<Batch[]>(LS.batches, []);
+  const i = all.findIndex(b => b.id === batchId);
+  if (i >= 0) { all[i] = { ...all[i], track }; write(LS.batches, all); }
+  return { ok: true, msg: 'Saved' };
 }
 
 // ============================================================
@@ -412,38 +455,73 @@ export async function setSessionLock(batchId: string, sessionKey: string, unlock
 
 // Enforce "only one session active at a time": unlock this one, lock all others in the batch.
 export async function activateOnlySession(batchId: string, sessionKey: string, updatedBy: string) {
-  for (const key of SESSION_KEYS) {
-    await setSessionLock(batchId, key, key === sessionKey, updatedBy);
+  await setLocksBulk([batchId], Object.fromEntries(SESSION_KEYS.map(k => [k, k === sessionKey])), updatedBy);
+}
+
+// Set many session keys across many batches in ONE request
+// (used to run all Junior / all Senior batches simultaneously).
+export async function setLocksBulk(batchIds: string[], states: Record<string, boolean>, updatedBy: string) {
+  const now = new Date().toISOString();
+  const keys = Object.keys(states);
+  if (HAS_SUPABASE && supabase) {
+    const rows = batchIds.flatMap(b => keys.map(k => ({ batch_id: b, session_key: k, unlocked: states[k], updated_by: updatedBy, updated_at: now })));
+    if (rows.length) await supabase.from('session_locks').upsert(rows, { onConflict: 'batch_id,session_key' });
+    return;
   }
+  const all = read<SessionLock[]>(LS.locks, []);
+  batchIds.forEach(batchId => keys.forEach(sessionKey => {
+    const row: SessionLock = { batchId, sessionKey, unlocked: states[sessionKey], updatedBy, updatedAt: now };
+    const i = all.findIndex(l => l.batchId === batchId && l.sessionKey === sessionKey);
+    if (i >= 0) all[i] = row; else all.push(row);
+  }));
+  write(LS.locks, all);
 }
 
 // ============================================================
 // PHASE 3: TRAINER QUESTION UPLOAD (parsed from CSV text)
 // ============================================================
-// CSV columns: section,day,level,question,optionA,optionB,optionC,optionD,answer(A-D)
-export function parseQuestionCsv(csv: string): Question[] {
+// CSV columns (new, recommended):
+//   track,day,session,topic,level,question,optionA,optionB,optionC,optionD,answer(A-D)
+//   e.g. senior,2,Morning,Quant Basics,I,"15% of 840?",116,126,136,146,B
+// Old 9-column format (section,day,level,question,A,B,C,D,answer) is still accepted;
+// those rows take the Track / Session chosen on the upload screen.
+export function parseQuestionCsv(csv: string, defaults?: { track: Track; slot: 'Morning' | 'Afternoon' }):
+  { questions: Question[]; skipped: string[] } {
   const lines = csv.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const out: Question[] = [];
-  const letterToIdx: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, a: 0, b: 1, c: 2, d: 3 };
+  const skipped: string[] = [];
+  const letterToIdx: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
   let start = 0;
-  if (lines[0] && /section/i.test(lines[0]) && /question/i.test(lines[0])) start = 1; // skip header
+  if (lines[0] && /question/i.test(lines[0]) && /(section|track|topic)/i.test(lines[0])) start = 1; // skip header
+  const stamp = Date.now();
   for (let i = start; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i]);
-    if (cols.length < 9) continue;
-    const [section, day, level, text, a, b, c, d, ans] = cols;
-    const answer = letterToIdx[ans.trim()] ?? 0;
-    const lv = (level || 'I').trim().toUpperCase();
+    const cols = splitCsvLine(lines[i]).map(c => c.trim());
+    let track: string, day: string, slot: string, topic: string, level: string, text: string, opts: string[], ans: string;
+    if (cols.length >= 11) {
+      [track, day, slot, topic, level, text] = cols; opts = cols.slice(6, 10); ans = cols[10];
+    } else if (cols.length >= 9) {
+      track = defaults?.track || ''; slot = defaults?.slot || '';
+      [topic, day, level, text] = cols; opts = cols.slice(4, 8); ans = cols[8];
+    } else { skipped.push(`Row ${i + 1}: needs 11 columns`); continue; }
+    const t = track.toLowerCase();
+    const s = slot.toLowerCase().startsWith('m') ? 'Morning' : slot.toLowerCase().startsWith('a') ? 'Afternoon' : '';
+    const d = Number(day);
+    const a = letterToIdx[(ans || '').toUpperCase()];
+    if (t !== 'junior' && t !== 'senior') { skipped.push(`Row ${i + 1}: track must be junior or senior`); continue; }
+    if (!(d >= 1 && d <= 5)) { skipped.push(`Row ${i + 1}: day must be 1-5`); continue; }
+    if (!s) { skipped.push(`Row ${i + 1}: session must be Morning or Afternoon`); continue; }
+    if (a === undefined) { skipped.push(`Row ${i + 1}: answer must be A, B, C or D`); continue; }
+    if (!text || opts.some(o => !o)) { skipped.push(`Row ${i + 1}: question and all 4 options are required`); continue; }
+    const lv = (level || 'I').toUpperCase();
     out.push({
-      id: 'up-' + Date.now() + '-' + i,
-      section: (section || 'APT').trim().toUpperCase(),
-      day: Number(day) || 1,
+      id: `up-${stamp}-${i}`,
+      section: topic || 'Trainer question', topic: topic || 'Trainer question',
+      track: t as Track, slot: s as 'Morning' | 'Afternoon', day: d,
       level: (['B', 'I', 'A'].includes(lv) ? lv : 'I') as any,
-      text: text.trim(),
-      options: [a, b, c, d].map(x => x.trim()),
-      answer,
+      text, options: opts, answer: a,
     });
   }
-  return out;
+  return { questions: out, skipped };
 }
 
 function splitCsvLine(line: string): string[] {
@@ -458,16 +536,24 @@ function splitCsvLine(line: string): string[] {
   return out.map(s => s.replace(/^"|"$/g, ''));
 }
 
-export async function addUploadedQuestions(qs: Question[]): Promise<number> {
-  if (qs.length === 0) return 0;
+export async function addUploadedQuestions(qs: Question[]): Promise<{ ok: boolean; count: number; msg: string }> {
+  if (qs.length === 0) return { ok: false, count: 0, msg: 'Nothing to upload.' };
   if (HAS_SUPABASE && supabase) {
-    const rows = qs.map(q => ({ id: q.id, section: q.section, day: q.day, level: q.level, text: q.text, options: q.options, answer: q.answer }));
-    await supabase.from('questions').insert(rows);
-    return qs.length;
+    const rows = qs.map(q => ({ id: q.id, section: q.section, topic: q.topic, track: q.track, slot: q.slot,
+      day: q.day, level: q.level, text: q.text, options: q.options, answer: q.answer }));
+    const { error } = await supabase.from('questions').insert(rows);
+    if (error) {
+      const hint = /track|slot|topic/.test(error.message) ? ' — run upgrade_tracks.sql in Supabase first.'
+        : /row-level security/i.test(error.message) ? ' — your role is not allowed to add questions (run upgrade_tracks.sql).' : '';
+      return { ok: false, count: 0, msg: 'Upload failed: ' + error.message + hint };
+    }
+    qCache = null;
+    return { ok: true, count: qs.length, msg: `${qs.length} question(s) added.` };
   }
   const existing = read<Question[]>(LS.uploadedQ, []);
   write(LS.uploadedQ, [...existing, ...qs]);
-  return qs.length;
+  qCache = null;
+  return { ok: true, count: qs.length, msg: `${qs.length} question(s) added.` };
 }
 
 // ============================================================
@@ -522,23 +608,48 @@ function autoSeqNumber(idx: number): string {
 
 export async function getCertSettings(batchId: string): Promise<CertSettings | null> {
   if (HAS_SUPABASE && supabase) {
-    // Fetch ALL cert_settings rows and find any with download enabled
-    // This handles the case where admin sets it on batch-1 but participant is in batch-2 etc.
-    const { data: allSettings } = await supabase.from('cert_settings').select('*');
-    if (!allSettings || allSettings.length === 0) return { batchId, downloadEnabled: false, collegeLogoUrl: '', collegeSignatoryName: '', collegeSignatoryTitle: '', updatedAt: '' };
-    // Prefer exact batch match, then any enabled batch
-    const exact = allSettings.find((r: any) => r.batch_id === batchId);
-    const anyEnabled = allSettings.find((r: any) => r.download_enabled === true);
-    const row = exact || anyEnabled || allSettings[0];
-    return { batchId: row.batch_id, downloadEnabled: row.download_enabled,
+    // STRICTLY this batch's row. A release for one batch never unlocks another
+    // (Junior and Senior batches run simultaneously). No row = locked.
+    const { data: row } = await supabase.from('cert_settings').select('*').eq('batch_id', batchId).maybeSingle();
+    if (!row) return { batchId, downloadEnabled: false, collegeLogoUrl: '', collegeSignatoryName: '', collegeSignatoryTitle: '', updatedAt: '' };
+    return { batchId: row.batch_id, downloadEnabled: row.download_enabled === true,
       collegeLogoUrl: row.college_logo_url, collegeSignatoryName: row.college_signatory_name,
       collegeSignatoryTitle: row.college_signatory_title,
       collegeSignatureUrl: row.college_signature_url || '',
       updatedAt: row.updated_at };
   }
-  const s = read<CertSettings | null>('ipec_cert_settings_' + batchId, null);
-  if (!s) return read<CertSettings | null>('ipec_cert_settings_batch-1', null);
-  return s;
+  return read<CertSettings | null>('ipec_cert_settings_' + batchId, null);
+}
+
+// Release / lock certificate download for many batches at once.
+// Touches ONLY download_enabled, so each batch keeps its own signatory/logo.
+export async function setCertRelease(batchIds: string[], enabled: boolean) {
+  if (HAS_SUPABASE && supabase) {
+    const now = new Date().toISOString();
+    const rows = batchIds.map(b => ({ batch_id: b, download_enabled: enabled, updated_at: now }));
+    if (rows.length) await supabase.from('cert_settings').upsert(rows, { onConflict: 'batch_id' });
+    return;
+  }
+  batchIds.forEach(b => {
+    const cur = read<CertSettings | null>('ipec_cert_settings_' + b, null) ||
+      { batchId: b, downloadEnabled: false, collegeLogoUrl: '', collegeSignatoryName: '', collegeSignatoryTitle: '', updatedAt: '' };
+    write('ipec_cert_settings_' + b, { ...cur, downloadEnabled: enabled, updatedAt: new Date().toISOString() });
+  });
+}
+
+export async function getAllCertReleases(): Promise<Record<string, boolean>> {
+  if (HAS_SUPABASE && supabase) {
+    const { data } = await supabase.from('cert_settings').select('batch_id, download_enabled');
+    const m: Record<string, boolean> = {};
+    (data || []).forEach((r: any) => { m[r.batch_id] = r.download_enabled === true; });
+    return m;
+  }
+  const m: Record<string, boolean> = {};
+  read<Batch[]>(LS.batches, []).forEach(b => {
+    const s = read<CertSettings | null>('ipec_cert_settings_' + b.id, null);
+    m[b.id] = !!s?.downloadEnabled;
+  });
+  return m;
 }
 
 export async function saveCertSettings(s: CertSettings) {

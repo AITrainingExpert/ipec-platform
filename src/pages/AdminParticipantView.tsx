@@ -4,6 +4,8 @@ import { getUsers, getMyResults, getMyDrills, getMyCertificate, getCertSettings 
 import { analyzeSkillGap, comprehensiveScore, evaluateBadges, conceptCoverage, recommendFor, sessionQuizAvg } from '../lib/logic';
 import { User, QuizResult, DrillResult, Certificate } from '../types';
 import { IPEC_LOGO, COLLEGE_LOGO_DEFAULT, QR_CODE } from '../lib/logos';
+import { cachedBatches, trackOfBatch } from '../lib/tracks';
+import { Batch } from '../types';
 
 const BADGE_CONFIG: Record<string, { color: string; bg: string; emoji: string; desc: string }> = {
   'Platinum Edge': { color: '#7c3aed', bg: '#f5f3ff', emoji: '💎', desc: 'Outstanding — Top Tier' },
@@ -12,10 +14,6 @@ const BADGE_CONFIG: Record<string, { color: string; bg: string; emoji: string; d
   'Bronze Edge':   { color: '#2563eb', bg: '#eff6ff', emoji: '🥉', desc: 'Programme Completion' },
 };
 
-function trackFromYear(year: string): string {
-  const y = (year || '').toLowerCase();
-  return y.includes('1') || y.includes('2') ? 'Junior Champion' : 'Senior Champion';
-}
 
 export default function AdminParticipantView() {
   const { userId } = useParams<{ userId: string }>();
@@ -26,6 +24,8 @@ export default function AdminParticipantView() {
   const [drills, setDrills] = useState<DrillResult[]>([]);
   const [cert, setCert] = useState<Certificate | null>(null);
   const [loading, setLoading] = useState(true);
+  const [batches, setBatches] = useState<Batch[]>([]);
+  useEffect(() => { cachedBatches().then(setBatches); }, []);
 
   useEffect(() => {
     if (!userId) return;
@@ -53,7 +53,8 @@ export default function AdminParticipantView() {
   const badges = evaluateBadges(results);
   const quizSessAvg = sessionQuizAvg(results);
   const finalScore = comprehensiveScore(quizSessAvg, drillAvg, passedDrills.length, badges.length);
-  const { track, coverage } = conceptCoverage(results, participant.year || '3rd');
+  const pTrack = trackOfBatch(batches.find(b => b.id === participant.batchId), participant.year);
+  const { track, coverage } = conceptCoverage(results, pTrack);
 
   // Session-wise scores
   const byDaySlot: Record<string, QuizResult> = {};
@@ -73,7 +74,7 @@ export default function AdminParticipantView() {
     );
 
     const badge = BADGE_CONFIG[cert.badgeLevel] || BADGE_CONFIG['Bronze Edge'];
-    const track2 = trackFromYear(participant.year || '3rd');
+    const track2 = pTrack === 'junior' ? 'Junior Champion' : 'Senior Champion';
     const issued = new Date(cert.issuedAt).toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' });
     const collegeLogo = cert.collegeLogoUrl || COLLEGE_LOGO_DEFAULT;
     const W = 1060, H = 730;

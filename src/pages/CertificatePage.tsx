@@ -4,6 +4,7 @@ import { getMyCertificate, getCertSettings, getMyResults, getMyDrills, generateC
 import { analyzeSkillGap, comprehensiveScore, evaluateBadges, sessionQuizAvg } from '../lib/logic';
 import { Certificate, CertSettings, QuizResult, DrillResult } from '../types';
 import { IPEC_LOGO, COLLEGE_LOGO_DEFAULT, QR_CODE } from '../lib/logos';
+import { useMyTrack } from '../lib/tracks';
 
 const BADGE_CONFIG: Record<string, { color: string; emoji: string; label: string }> = {
   'Platinum Edge': { color: '#6d28d9', emoji: '💎', label: 'Platinum Edge' },
@@ -14,10 +15,6 @@ const BADGE_CONFIG: Record<string, { color: string; emoji: string; label: string
 
 function badgeFromScore(s: number) {
   return s >= 85 ? 'Platinum Edge' : s >= 70 ? 'Gold Edge' : s >= 55 ? 'Silver Edge' : 'Bronze Edge';
-}
-function trackFromYear(year: string) {
-  const y = (year || '').toLowerCase();
-  return y.includes('1') || y.includes('2') ? 'Junior Champion' : 'Senior Champion';
 }
 
 export default function CertificatePage() {
@@ -31,6 +28,7 @@ export default function CertificatePage() {
   const [generating, setGenerating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const certRef = useRef<HTMLDivElement>(null);
+  const { track: myTrack } = useMyTrack();
 
   const loadAll = async () => {
     if (!user) return;
@@ -84,6 +82,23 @@ export default function CertificatePage() {
 
   if (loading) return <div className="text-center py-16 text-slate-400">Loading your certificate...</div>;
 
+  // ── Admin has NOT released certificates for this batch: show nothing to download, no preview ──
+  if (!settings?.downloadEnabled) return (
+    <div className="max-w-lg mx-auto bg-white border border-slate-200 rounded-2xl p-10 text-center mt-10">
+      <div className="text-5xl mb-4">🔒</div>
+      <h1 className="text-xl font-extrabold text-slate-800">Certificate not released yet</h1>
+      <p className="text-slate-500 text-sm mt-2">Certificates are released by the iPEC admin for your batch at the end of the programme.
+        Keep completing your Morning and Afternoon quizzes and drills — your score is building up.</p>
+      <div className="mt-5 bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+        <div className="text-3xl font-extrabold text-brand">{finalScore}%</div>
+        <div className="text-xs text-slate-500 mt-1">Your consolidated score so far</div>
+      </div>
+      <button onClick={refreshSettings} disabled={refreshing}
+        className="mt-5 text-sm font-semibold text-brand border border-indigo-200 px-4 py-2 rounded-lg hover:bg-indigo-50">
+        {refreshing ? 'Checking…' : '🔄 Check again'}</button>
+    </div>
+  );
+
   if (results.length === 0 && !cert) return (
     <div className="max-w-lg mx-auto bg-white border border-slate-200 rounded-2xl p-10 text-center mt-10">
       <div className="text-5xl mb-4">📝</div>
@@ -116,12 +131,12 @@ export default function CertificatePage() {
     </div>
   );
 
-  return <CertView cert={cert} settings={settings} userYear={user?.year || ''} onRefresh={refreshSettings} refreshing={refreshing} onDownload={download} certRef={certRef} />;
+  return <CertView cert={cert} settings={settings} trackLabel={myTrack === 'junior' ? 'Junior Champion' : 'Senior Champion'} onRefresh={refreshSettings} refreshing={refreshing} onDownload={download} certRef={certRef} />;
 }
 
-function CertView({ cert, settings, userYear, onRefresh, refreshing, onDownload, certRef }: any) {
+function CertView({ cert, settings, trackLabel, onRefresh, refreshing, onDownload, certRef }: any) {
   const badge = BADGE_CONFIG[cert.badgeLevel] || BADGE_CONFIG['Bronze Edge'];
-  const track = trackFromYear(userYear || cert.semester || '3rd');
+  const track = trackLabel;
   const issued = new Date(cert.issuedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
   const collegeLogo = settings?.collegeLogoUrl || cert.collegeLogoUrl || COLLEGE_LOGO_DEFAULT;
   const collegeSignature = settings?.collegeSignatureUrl || null;

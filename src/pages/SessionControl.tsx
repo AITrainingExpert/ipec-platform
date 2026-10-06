@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
-import { getBatches, getBatchResults, getBatchDrills, getSessionLocks, setSessionLock, activateOnlySession, SESSION_KEYS } from '../lib/db';
-import { Batch, QuizResult, DrillResult } from '../types';
+import { getBatches, getBatchResults, getBatchDrills, getSessionLocks, setLocksBulk, SESSION_KEYS } from '../lib/db';
+import { Batch, QuizResult, DrillResult, Track } from '../types';
+import { trackOfBatch } from '../lib/tracks';
+import { TRACK_LABEL, sessionTopics } from '../lib/bank';
 
 // Attempt status for a participant on a given session/day
 type AttemptStatus = 'not-started' | 'attempted' | 'completed';
@@ -27,6 +29,9 @@ export default function SessionControl() {
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<'exclusive' | 'flexible'>('exclusive');
   const [pageLoading, setPageLoading] = useState(true);
+  // Admin can drive every batch of a track at once (batches run simultaneously)
+  const [scope, setScope] = useState<'batch' | Track>('batch');
+  const isAdmin = user?.role === 'admin';
 
   useEffect(() => {
     getBatches().then(b => { setBatches(b); setPageLoading(false); });
@@ -48,31 +53,25 @@ export default function SessionControl() {
   };
   useEffect(() => { load(); }, [batchId]);
 
+  const currentBatch = batches.find(b => b.id === batchId);
+  const batchTrack = trackOfBatch(currentBatch);
+  const targetIds = scope === 'batch' ? [batchId] : batches.filter(b => trackOfBatch(b) === scope).map(b => b.id);
+  const scopeLabel = scope === 'batch' ? (currentBatch?.name || batchId) : `all ${targetIds.length} ${TRACK_LABEL[scope]} batches`;
+
+  const apply = async (states: Record<string, boolean>) => {
+    if (!targetIds.length) return;
+    if (scope !== 'batch' && !window.confirm(`Apply this to ${scopeLabel}?`)) return;
+    setBusy(true);
+    await setLocksBulk(targetIds, states, user!.name);
+    await load(); setBusy(false);
+  };
+
   // Activate one session (locks all others) — exclusive mode
-  const activateExclusive = async (key: string) => {
-    setBusy(true);
-    await activateOnlySession(batchId, key, user!.name);
-    await load(); setBusy(false);
-  };
-
+  const activateExclusive = (key: string) => apply(Object.fromEntries(SESSION_KEYS.map(k => [k, k === key])));
   // Toggle individual session (flexible mode — multiple can be open)
-  const toggleSession = async (key: string) => {
-    setBusy(true);
-    await setSessionLock(batchId, key, !locks[key], user!.name);
-    await load(); setBusy(false);
-  };
-
-  const lockAll = async () => {
-    setBusy(true);
-    for (const k of SESSION_KEYS) await setSessionLock(batchId, k, false, user!.name);
-    await load(); setBusy(false);
-  };
-
-  const unlockAll = async () => {
-    setBusy(true);
-    for (const k of SESSION_KEYS) await setSessionLock(batchId, k, true, user!.name);
-    await load(); setBusy(false);
-  };
+  const toggleSession = (key: string) => apply({ [key]: !locks[key] });
+  const lockAll = () => apply(Object.fromEntries(SESSION_KEYS.map(k => [k, false])));
+  const unlockAll = () => apply(Object.fromEntries(SESSION_KEYS.map(k => [k, true])));
 
   if (pageLoading || authLoading) return (
     <div className="text-center py-16 text-slate-400">
@@ -112,8 +111,20 @@ export default function SessionControl() {
       <div className="flex items-center gap-3 flex-wrap">
         <span className="text-sm font-semibold text-slate-600">Batch:</span>
         <select value={batchId} onChange={e => setBatchId(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          {(isAdmin ? batches : batches.filter(b => b.id === user?.batchId)).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
+        <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${batchTrack === 'junior' ? 'bg-sky-50 text-sky-700' : 'bg-violet-50 text-violet-700'}`}>{TRACK_LABEL[batchTrack]}</span>
+
+        {isAdmin && (
+          <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+            {(['batch', 'junior', 'senior'] as const).map(sc => (
+              <button key={sc} onClick={() => { setScope(sc); if (sc !== 'batch') { const first = batches.find(b => trackOfBatch(b) === sc); if (first) setBatchId(first.id); } }}
+                className={`text-xs font-bold px-3 py-1.5 rounded-md ${scope === sc ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>
+                {sc === 'batch' ? 'This batch' : `All ${sc === 'junior' ? 'Junior' : 'Senior'}`}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Mode toggle */}
         <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
@@ -134,6 +145,12 @@ export default function SessionControl() {
           </div>
         : <div className="bg-slate-50 border border-slate-200 text-slate-500 rounded-lg p-3 text-sm">No session active. Participants cannot access quizzes, drills or activities until you activate one.</div>}
 
+      {scope !== 'batch' && (
+        <div className="bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg p-3 text-sm">
+          Changes apply to <strong>{scopeLabel}</strong> at once. The grid shows the state of <strong>{currentBatch?.name}</strong>.
+        </div>
+      )}
+
       {/* Mode hint */}
       <p className="text-xs text-slate-400">
         {mode === 'exclusive' ? '● Exclusive mode: activating a session auto-locks all others.' : '● Flexible mode: toggle each session independently — multiple can be open at once.'}
@@ -153,8 +170,9 @@ export default function SessionControl() {
                 const done = participants.filter(([, v]) => v.days[String(day)] === 'completed').length;
                 return (
                   <div key={key} className="flex items-center justify-between">
-                    <div>
+                    <div className="pr-2">
                       <span className="text-sm text-slate-600">{sess}</span>
+                      <div className="text-[10px] text-slate-400 leading-snug">{sessionTopics(batchTrack, day, sess as 'Morning' | 'Afternoon').join(' · ')}</div>
                       {participants.length > 0 && (
                         <span className="ml-2 text-[10px] text-slate-400">
                           {done} done · {attempted - done} partial · {participants.length - attempted} not started
