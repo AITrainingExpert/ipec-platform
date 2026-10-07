@@ -22,6 +22,7 @@ import AdminActivity from './pages/AdminActivity';
 import AdminParticipantView from './pages/AdminParticipantView';
 import TrainerDashboard from './pages/TrainerDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import Participants from './pages/Participants';
 
 function Shell() {
   const { user, loading } = useAuth();
@@ -51,6 +52,7 @@ function Shell() {
         <Route path="/analytics" element={isStaff ? <Analytics /> : <Navigate to={home} />} />
         <Route path="/sessions" element={isStaff ? <SessionControl /> : <Navigate to={home} />} />
         <Route path="/enrollment" element={isStaff ? <Enrollment /> : <Navigate to={home} />} />
+        <Route path="/participants" element={isStaff ? <Participants /> : <Navigate to={home} />} />
 
         <Route path="/admin" element={user.role === 'admin' ? <AdminDashboard /> : <Navigate to={home} />} />
         <Route path="/certadmin" element={user.role === 'admin' ? <CertAdmin /> : <Navigate to={home} />} />

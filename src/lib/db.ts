@@ -899,3 +899,41 @@ export async function getSessionCompletionMap(batchId?: string):
   });
   return map;
 }
+
+// ============================================================
+// ADMIN: correct a participant's registration details.
+// Email is the login id, so it is not editable here.
+// Changing the batch also moves the enrollment (allowed_emails) row,
+// so the student stays in the new batch on every future login.
+// ============================================================
+export type ProfilePatch = { name?: string; mobile?: string; branch?: string; year?: string; college?: string; batchId?: string };
+
+export async function updateParticipantProfile(user: User, patch: ProfilePatch): Promise<{ ok: boolean; msg: string }> {
+  const row: Record<string, any> = {};
+  if (patch.name !== undefined) row.name = patch.name.trim();
+  if (patch.mobile !== undefined) row.mobile = patch.mobile.trim();
+  if (patch.branch !== undefined) row.branch = patch.branch.trim();
+  if (patch.year !== undefined) row.year = patch.year;
+  if (patch.college !== undefined) row.college = patch.college.trim();
+  if (patch.batchId !== undefined) row.batch_id = patch.batchId;
+  if (HAS_SUPABASE && supabase) {
+    const { data, error } = await supabase.from('profiles').update(row).eq('id', user.id).select('id');
+    if (error) return { ok: false, msg: error.message };
+    if (!data || data.length === 0) return { ok: false, msg: 'Not saved — run upgrade_admin_edit.sql in Supabase once (it allows admin to edit profiles).' };
+    if (patch.batchId && patch.batchId !== user.batchId && user.email) {
+      await supabase.from('allowed_emails').update({ batch_id: patch.batchId }).eq('email', user.email.trim().toLowerCase());
+    }
+    return { ok: true, msg: 'Saved' };
+  }
+  const users = read<User[]>(LS.users, []);
+  const i = users.findIndex(u => u.id === user.id);
+  if (i < 0) return { ok: false, msg: 'User not found' };
+  users[i] = { ...users[i], ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as User;
+  write(LS.users, users);
+  if (patch.batchId && user.email) {
+    const list = read<AllowedEmail[]>(LS.allowed, []);
+    list.forEach(a => { if (a.email === user.email.toLowerCase()) a.batchId = patch.batchId!; });
+    write(LS.allowed, list);
+  }
+  return { ok: true, msg: 'Saved' };
+}
