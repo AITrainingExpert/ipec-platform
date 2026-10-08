@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
+import { canExport } from '../lib/permissions';
 import { getBatchResults, getBatchDrills, getUsers } from '../lib/db';
 import { QuizResult, DrillResult, User } from '../types';
 import { comprehensiveScore, evaluateBadges, sessionQuizAvg } from '../lib/logic';
@@ -41,6 +42,7 @@ export default function TrainerDashboard() {
   const risk = rows.filter(r => r.band === 'At Risk').length;
 
   const exportCsv = () => {
+    if (!canExport(user)) return;
     const head = 'Name,Avg %,Days done,Quizzes,Readiness,Focus areas\n';
     const body = rows.map(r => `${r.name},${r.avg},${r.days},${r.count},${r.band},"${r.gaps.join('; ')}"`).join('\n');
     const blob = new Blob([head + body], { type: 'text/csv' });
@@ -51,7 +53,7 @@ export default function TrainerDashboard() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-extrabold text-slate-800">{user?.role === 'admin' ? 'All Results' : 'Batch Dashboard'}</h1>
-        <button onClick={exportCsv} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg">Export CSV</button>
+        {canExport(user) && <button onClick={exportCsv} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg">Export CSV</button>}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

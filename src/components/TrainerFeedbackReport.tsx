@@ -97,12 +97,12 @@ export default function TrainerFeedbackReport({ isAdmin, batchId }: { isAdmin: b
     }).sort((a, b) => b.overall - a.overall || a.trainer.localeCompare(b.trainer));
   }, [filtered]);
 
-  const exportSummary = () => downloadCsv(`trainer-feedback-summary-${today()}.csv`,
+  const exportSummary = () => isAdmin && downloadCsv(`trainer-feedback-summary-${today()}.csv`,
     ['Trainer', 'Batch', 'Track', 'Responses', 'Sessions rated', ...RATINGS.map(r => `${r.label} (avg /5)`), 'Overall (avg /5)'],
     summary.map(s => [s.trainer, s.batchName, s.track === 'junior' ? 'Junior Champions' : 'Senior Champions',
       s.responses, s.sessions, ...s.per, s.overall]));
 
-  const exportDetail = () => downloadCsv(`trainer-feedback-responses-${today()}.csv`,
+  const exportDetail = () => isAdmin && downloadCsv(`trainer-feedback-responses-${today()}.csv`,
     ['Trainer', 'Batch', 'Track', 'Session', 'Participant', ...RATINGS.map(r => r.label), 'Comments', 'Submitted'],
     filtered.map(r => [r.trainer, r.batchName, r.track === 'junior' ? 'Junior Champions' : 'Senior Champions',
       sessionLabel(r.sessionKey), r.userName, ...RATINGS.map(R => r[R.key]), r.comments || '',
@@ -146,10 +146,10 @@ export default function TrainerFeedbackReport({ isAdmin, batchId }: { isAdmin: b
 
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-slate-500">{filtered.length} response(s) · {summary.length} trainer/batch group(s)</p>
-        <div className="flex gap-2">
+        {isAdmin && <div className="flex gap-2">
           <button onClick={exportSummary} disabled={!summary.length} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50">⬇ Trainer summary (CSV)</button>
           <button onClick={exportDetail} disabled={!filtered.length} className="border border-slate-200 bg-white text-slate-700 text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50">⬇ All responses (CSV)</button>
-        </div>
+        </div>}
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">

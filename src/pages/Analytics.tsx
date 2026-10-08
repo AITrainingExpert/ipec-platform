@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
+import { canExport } from '../lib/permissions';
 import { getBatchResults, getBatchDrills, getUsers } from '../lib/db';
 import { QuizResult, DrillResult, User } from '../types';
 import { comprehensiveScore, evaluateBadges, sessionQuizAvg } from '../lib/logic';
@@ -59,6 +60,7 @@ export default function Analytics() {
   };
 
   const exportPdf = () => {
+    if (!canExport(user)) return;
     const w = window.open('', '_blank'); if (!w) return;
     const branchRows = branches.map(b => `<tr><td>${b.branch}</td><td>${b.pct}%</td><td>${b.n}</td></tr>`).join('');
     const candRows = rows.map(r => `<tr><td>${r.name}</td><td>${r.branch}</td><td>${r.avg}%</td><td>${r.xp}</td><td>${r.readiness}</td></tr>`).join('');
@@ -79,7 +81,7 @@ export default function Analytics() {
           <h1 className="text-xl font-extrabold text-slate-800">Recruiter Analytics</h1>
           <p className="text-sm text-slate-500">{user?.role === 'admin' ? 'All batches' : 'Your batch'} · placement readiness overview</p>
         </div>
-        <button onClick={exportPdf} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg">Export Cohort Report (PDF)</button>
+        {canExport(user) && <button onClick={exportPdf} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg">Export Cohort Report (PDF)</button>}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

@@ -8,7 +8,7 @@ import { Batch, Track, User } from '../types';
 // ============================================================
 // PARTICIPANTS — registration data for every student.
 // Admin: all batches, download CSV, edit wrong entries.
-// Trainer: own batch, view + download only.
+// Trainer: own batch, view only (no download).
 // ============================================================
 
 const csvCell = (v: any) => {
@@ -57,6 +57,7 @@ export default function Participants() {
     .sort((a, b) => String(a.batchName).localeCompare(String(b.batchName), undefined, { numeric: true }) || String(a.name || '').localeCompare(String(b.name || '')));
 
   const download = () => {
+    if (!isAdmin) return;
     const header = ['S.No', 'Name', 'Email', 'Mobile', 'Branch', 'Year', 'College', 'Batch', 'Track', 'Status', 'Registered on'];
     const rows = people.map((u, i) => [i + 1, u.name, u.email, u.mobile, u.branch, u.year, u.college, u.batchName,
       u.track === 'junior' ? 'Junior Champions' : 'Senior Champions', blocked.has(String(u.email || '').toLowerCase()) ? 'Blocked' : 'Active', fmtDate(u.createdAt)]);
@@ -77,7 +78,7 @@ export default function Participants() {
           <h1 className="text-xl font-extrabold text-slate-800">Participants</h1>
           <p className="text-sm text-slate-500">Details students entered at registration.{isAdmin ? ' Click Edit to correct a wrong entry.' : ''}</p>
         </div>
-        <button onClick={download} disabled={!people.length} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50">⬇ Download CSV ({people.length})</button>
+        {isAdmin && <button onClick={download} disabled={!people.length} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50">⬇ Download CSV ({people.length})</button>}
       </div>
 
       <div className="flex flex-wrap gap-2 items-center">

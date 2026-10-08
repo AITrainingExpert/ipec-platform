@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
+import { canExport } from '../lib/permissions';
 import { getBatches, getBatchResults, getNbaConfig, saveNbaConfig, computeAttainment, DEFAULT_COS } from '../lib/db';
 import { Batch, QuizResult, NbaConfig, CourseOutcome } from '../types';
 
@@ -43,6 +44,7 @@ export default function NbaReport() {
 
   // Generate and download Word report
   const downloadWord = () => {
+    if (!canExport(user)) return;
     const rows = attainment.map(a =>
       `<tr><td>${a.co.id}</td><td>${a.co.statement}</td><td>${a.co.poMapping}</td><td>${a.co.psoMapping || '—'}</td><td>${a.studentsAttempted}</td><td>${a.studentsAttained}</td><td>${a.attainmentPct}%</td><td>${a.attainmentPct >= 60 ? 'Attained ✓' : 'Not Attained'}</td></tr>`
     ).join('');
@@ -122,6 +124,7 @@ classroom instruction.</p>
 
   // Generate PDF
   const downloadPdf = () => {
+    if (!canExport(user)) return;
     const w = window.open('', '_blank'); if (!w) return;
     w.document.write(`<!DOCTYPE html><html><head><title>NBA Report</title>
 <style>
@@ -167,8 +170,8 @@ ${attainment.map(a => `<tr><td><strong>${a.co.id}</strong></td><td>${a.co.statem
           <select value={batchId} onChange={e => setBatchId(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
             {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
-          <button onClick={downloadWord} className="bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">⬇ Word (.doc)</button>
-          <button onClick={downloadPdf} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg">⬇ PDF</button>
+          {canExport(user) && <button onClick={downloadWord} className="bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">⬇ Word (.doc)</button>}
+          {canExport(user) && <button onClick={downloadPdf} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg">⬇ PDF</button>}
         </div>
       </div>
 

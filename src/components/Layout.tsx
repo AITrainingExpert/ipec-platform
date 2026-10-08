@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import ViewOnlyGuard from './ViewOnlyGuard';
 
 const NAV: Record<string, { to: string; label: string }[]> = {
   participant: [
@@ -42,6 +43,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <ViewOnlyGuard active={user?.role === 'trainer'} />
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="font-extrabold text-brand">iPEC <span className="text-slate-800">Employability Edge</span></div>
@@ -55,6 +57,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </nav>
           <div className="flex items-center gap-3">
             <span className="text-xs text-slate-500 capitalize hidden sm:block">{user?.name} · {user?.role}</span>
+            {user?.role === 'trainer' && <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full" title="Trainer accounts can view reports but not download, copy or print them">View only</span>}
             <button onClick={() => { logout(); nav('/'); }} className="text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-50">Logout</button>
           </div>
         </div>
