@@ -21,6 +21,7 @@ const NAV: Record<string, { to: string; label: string }[]> = {
     { to: '/enrollment', label: 'Enrollment & Content' },
     { to: '/participants', label: 'Participants' },
     { to: '/analytics', label: 'Analytics' },
+    { to: '/reports', label: 'Reports' },
     { to: '/nba', label: 'NBA / OBE Report' },
   ],
   admin: [
@@ -31,6 +32,7 @@ const NAV: Record<string, { to: string; label: string }[]> = {
     { to: '/enrollment', label: 'Enrollment & Content' },
     { to: '/sessions', label: 'Session Control' },
     { to: '/analytics', label: 'Analytics' },
+    { to: '/reports', label: 'Reports' },
     { to: '/nba', label: 'NBA / OBE Report' },
     { to: '/trainer', label: 'All Results' },
   ],

@@ -23,6 +23,7 @@ import AdminParticipantView from './pages/AdminParticipantView';
 import TrainerDashboard from './pages/TrainerDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import Participants from './pages/Participants';
+import Reports from './pages/Reports';
 
 function Shell() {
   const { user, loading } = useAuth();
@@ -50,6 +51,7 @@ function Shell() {
 
         <Route path="/trainer" element={isStaff ? <TrainerDashboard /> : <Navigate to={home} />} />
         <Route path="/analytics" element={isStaff ? <Analytics /> : <Navigate to={home} />} />
+        <Route path="/reports" element={isStaff ? <Reports /> : <Navigate to={home} />} />
         <Route path="/sessions" element={isStaff ? <SessionControl /> : <Navigate to={home} />} />
         <Route path="/enrollment" element={isStaff ? <Enrollment /> : <Navigate to={home} />} />
         <Route path="/participants" element={isStaff ? <Participants /> : <Navigate to={home} />} />
