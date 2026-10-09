@@ -11,34 +11,43 @@
 //   trainer → locked to their own batch
 //   student → no access (the route is staff-only)
 // ============================================================
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
-  REPORTS, ReportDef, Row, buildPDF, fileName, fmt, sortRows, toCSV,
+  REPORTS, Row, buildPDF, fileName, fmt, sortRows, toCSV,
 } from '../lib/reportExport';
 
 // Typed loosely on purpose: works with any Supabase client export.
 const sb: any = supabase;
 
-const PAGE = 1000;          // Supabase returns at most 1000 rows per request
 const PREVIEW_ROWS = 300;   // rows shown on screen (downloads include all)
 const DAYS = ['1', '2', '3', '4', '5'];
 
 interface Me { name: string; email: string; role: string; batchId: string | null; }
 interface BatchOpt { batch_id: string; batch_no: string; batch_name: string; trainer_name: string | null; }
+interface Filters { batch?: string; day?: string; session?: string; dept?: string; }
 
-async function fetchAll(report: ReportDef, filters: Record<string, string>): Promise<Row[]> {
-  const out: Row[] = [];
-  for (let from = 0; ; from += PAGE) {
-    let q = sb.from(report.view).select('*');
-    for (const [k, v] of Object.entries(filters)) if (v) q = q.eq(k, v);
-    for (const k of report.uniqueKey) q = q.order(k, { ascending: true });
-    const { data, error } = await q.range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
-    out.push(...((data || []) as Row[]));
-    if (!data || data.length < PAGE) break;
-  }
-  return sortRows(out, report);
+// Every report comes from ONE secure database function, rpt_fetch().
+// The database checks the role and locks trainers to their own batch.
+async function fetchReport<T = Row>(reportKey: string, f: Filters = {}): Promise<T[]> {
+  const { data, error } = await sb.rpc('rpt_fetch', {
+    p_report: reportKey,
+    p_batch: f.batch || null,
+    p_day: f.day ? Number(f.day) : null,
+    p_session: f.session || null,
+    p_dept: f.dept || null,
+  });
+  if (error) throw new Error(error.message);
+  return (Array.isArray(data) ? data : []) as T[];
+}
+
+function friendlyError(msg: string): string {
+  if (/rpt_fetch|could not find the function|does not exist/i.test(msg))
+    return 'Reports are not installed in the database yet. Run the latest reports-views.sql in Supabase once.';
+  if (/NOT_ALLOWED/.test(msg)) return 'Reports are available to trainers and admins only.';
+  if (/NO_BATCH/.test(msg)) return 'Your trainer account has no batch assigned. Ask the admin to set it.';
+  if (/timeout/i.test(msg)) return 'The report took too long. Pick one batch or one day and try again.';
+  return msg || 'Could not load the report.';
 }
 
 function download(content: Blob, name: string) {
@@ -86,46 +95,43 @@ export default function Reports() {
   useEffect(() => {
     if (!me || (!isAdmin && !isTrainer)) return;
     (async () => {
-      const { data } = await sb.from('rpt_batch_trainer')
-        .select('batch_id,batch_no,batch_name,trainer_name');
-      const list = ((data || []) as BatchOpt[])
-        .sort((a, b) => Number(a.batch_no) - Number(b.batch_no) || a.batch_id.localeCompare(b.batch_id));
-      setBatches(isTrainer ? list.filter(b => b.batch_id === me.batchId) : list);
+      try {
+        const list = (await fetchReport<BatchOpt>('batches'))
+          .sort((a, b) => Number(a.batch_no) - Number(b.batch_no) || a.batch_id.localeCompare(b.batch_id));
+        setBatches(list);
+      } catch (e: any) { setError(friendlyError(e?.message || '')); }
     })();
   }, [me, isAdmin, isTrainer]);
 
-  // ---- department list (for the chosen batch) ----
+  // ---- department list (for the chosen batch), read straight from profiles ----
   useEffect(() => {
     if (!me || (!isAdmin && !isTrainer)) return;
     (async () => {
-      let q = sb.from('rpt_department_day').select('department');
-      if (batch) q = q.eq('batch_id', batch);
-      const { data } = await q;
-      const set = new Set<string>(((data || []) as Row[]).map(r => String(r.department)));
-      setDepartments([...set].sort());
-      setDept(d => (d && !set.has(d) ? '' : d));
+      try {
+        const list = (await fetchReport<string>('departments', { batch })).map(String);
+        setDepartments(list);
+        setDept(d => (d && !list.includes(d) ? '' : d));
+      } catch { setDepartments([]); }
     })();
   }, [me, batch, isAdmin, isTrainer]);
 
-  // ---- load the report ----
+  // ---- load the report (latest request wins if filters change quickly) ----
+  const reqId = useRef(0);
   const load = useCallback(async () => {
     if (!me || (!isAdmin && !isTrainer)) return;
-    if (isTrainer && !me.batchId) { setError('Your trainer account has no batch assigned. Ask the admin to set it.'); return; }
+    const id = ++reqId.current;
     setLoading(true); setError('');
     try {
-      const f: Record<string, string> = {
-        batch_id: isTrainer ? (me.batchId as string) : batch,
-        day_no: day,
+      const data = await fetchReport(report.id, {
+        batch: isTrainer ? undefined : batch,          // trainers: the database applies their batch
+        day,
         session: report.sessionFilter ? session : '',
-        department: report.id === 'batch' ? '' : dept,
-      };
-      setRows(await fetchAll(report, f));
+        dept: report.id === 'batch' ? '' : dept,
+      });
+      if (id === reqId.current) setRows(sortRows(data, report));
     } catch (e: any) {
-      setError(/does not exist/i.test(e?.message || '')
-        ? 'Report views are not installed yet. Run reports-views.sql in Supabase once.'
-        : (e?.message || 'Could not load the report.'));
-      setRows([]);
-    } finally { setLoading(false); }
+      if (id === reqId.current) { setError(friendlyError(e?.message || '')); setRows([]); }
+    } finally { if (id === reqId.current) setLoading(false); }
   }, [me, isAdmin, isTrainer, batch, day, session, dept, report]);
 
   useEffect(() => { load(); }, [load]);
