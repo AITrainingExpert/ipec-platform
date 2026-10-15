@@ -33,7 +33,7 @@ export const REPORTS: ReportDef[] = [
     sessionFilter: true,
     order: [{ col: 'batch_no', asc: true }, { col: 'day_no', asc: true }, { col: 'session', asc: true }],
     columns: [
-      C('batch_no', 'Batch'), C('trainer_name', 'Trainer'), C('trainer_email', 'Trainer Email'),
+      C('batch_name', 'Batch'), C('trainer_name', 'Trainer'), C('trainer_email', 'Trainer Email'),
       C('trainer_mobile', 'Trainer Mobile'), C('day_no', 'Day'), C('session', 'Session'),
       C('enrolled_students', 'Enrolled'), C('students_attempted', 'Attempted'),
       C('participation_pct', 'Participation %'), C('avg_score_pct', 'Avg %'),
@@ -52,7 +52,7 @@ export const REPORTS: ReportDef[] = [
     sessionFilter: false,
     order: [{ col: 'department', asc: true }, { col: 'batch_no', asc: true }, { col: 'day_no', asc: true }],
     columns: [
-      C('department', 'Department'), C('batch_no', 'Batch'), C('trainer_name', 'Trainer'),
+      C('department', 'Department'), C('batch_name', 'Batch'), C('trainer_name', 'Trainer'),
       C('trainer_email', 'Trainer Email'), C('day_no', 'Day'), C('students', 'Students'),
       C('avg_score_pct', 'Day Avg %'), C('morning_avg_pct', 'Morning %'),
       C('afternoon_avg_pct', 'Afternoon %'), C('quiz_avg_pct', 'Quiz %'), C('drill_avg_pct', 'Drill %'),
@@ -68,7 +68,7 @@ export const REPORTS: ReportDef[] = [
     sessionFilter: true,
     order: [{ col: 'batch_no', asc: true }, { col: 'day_no', asc: true }, { col: 'session', asc: true }, { col: 'rank_in_batch', asc: true }],
     columns: [
-      C('batch_no', 'Batch'), C('trainer_name', 'Trainer'), C('day_no', 'Day'), C('session', 'Session'),
+      C('batch_name', 'Batch'), C('trainer_name', 'Trainer'), C('day_no', 'Day'), C('session', 'Session'),
       C('rank_in_batch', 'Rank'), C('student_name', 'Student'), C('usn', 'USN'),
       C('student_email', 'Email'), C('department', 'Department'),
       C('quiz_best_pct', 'Quiz Best %'), C('drill_avg_pct', 'Drill Avg %'),
@@ -86,7 +86,7 @@ export const REPORTS: ReportDef[] = [
     sessionFilter: true,
     order: [{ col: 'batch_no', asc: true }, { col: 'day_no', asc: true }, { col: 'student_name', asc: true }, { col: 'completed_at_ist', asc: true }],
     columns: [
-      C('batch_no', 'Batch'), C('trainer_name', 'Trainer'), C('day_no', 'Day'), C('session', 'Session'),
+      C('batch_name', 'Batch'), C('trainer_name', 'Trainer'), C('day_no', 'Day'), C('session', 'Session'),
       C('student_name', 'Student'), C('usn', 'USN'), C('department', 'Department'),
       C('activity_type', 'Type'), C('activity_name', 'Activity'), C('attempt_no', 'Attempt'),
       C('score', 'Score'), C('total', 'Out of'), C('percentage', '%'), C('passed', 'Passed'),

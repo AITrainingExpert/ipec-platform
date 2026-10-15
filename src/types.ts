@@ -96,6 +96,9 @@ export interface AllowedEmail {
   batchId: string;
   addedBy: string;
   createdAt: string;
+  isBlocked?: boolean;
+  usn?: string;           // from the college list, when imported
+  name?: string;
 }
 
 // ---- Phase 2: Session locks (5 days x Morning/Afternoon) ----

@@ -16,6 +16,9 @@ import { supabase } from '../lib/supabase';
 import {
   REPORTS, Row, buildPDF, fileName, fmt, sortRows, toCSV,
 } from '../lib/reportExport';
+import { getBatches } from '../lib/db';
+import { Batch, User } from '../types';
+import TrackBatchPicker, { useScope, TRACK_NAME } from '../components/TrackBatchPicker';
 
 // Typed loosely on purpose: works with any Supabase client export.
 const sb: any = supabase;
@@ -61,9 +64,13 @@ function download(content: Blob, name: string) {
 export default function Reports() {
   const [me, setMe] = useState<Me | null>(null);
   const [batches, setBatches] = useState<BatchOpt[]>([]);
+  const [allBatches, setAllBatches] = useState<Batch[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
   const [reportId, setReportId] = useState(REPORTS[0].id);
-  const [batch, setBatch] = useState('');
+  // Senior and Junior are never mixed: the admin picks a track, then all its batches or one
+  const scopeUser = useMemo(() => (me ? ({ role: me.role, batchId: me.batchId || undefined } as unknown as User) : null), [me]);
+  const { scope, setScope, trackBatches, batchIds, label: scopeLabel } = useScope(scopeUser, allBatches);
+  const batch = me?.role === 'admin' ? scope.batchId : '';
   const [day, setDay] = useState('');
   const [session, setSession] = useState('');
   const [dept, setDept] = useState('');
@@ -87,7 +94,6 @@ export default function Reports() {
       if (e || !p) { setError('Could not read your profile.'); return; }
       const m: Me = { name: p.name || p.email, email: p.email, role: p.role, batchId: p.batch_id };
       setMe(m);
-      if (m.role === 'trainer') setBatch(m.batchId || '');
     })();
   }, []);
 
@@ -99,6 +105,7 @@ export default function Reports() {
         const list = (await fetchReport<BatchOpt>('batches'))
           .sort((a, b) => Number(a.batch_no) - Number(b.batch_no) || a.batch_id.localeCompare(b.batch_id));
         setBatches(list);
+        setAllBatches(await getBatches());
       } catch (e: any) { setError(friendlyError(e?.message || '')); }
     })();
   }, [me, isAdmin, isTrainer]);
@@ -128,13 +135,13 @@ export default function Reports() {
         session: report.sessionFilter ? session : '',
         dept: report.id === 'batch' ? '' : dept,
       });
-      if (id === reqId.current) setRows(sortRows(data, report));
+      if (id === reqId.current) setRows(sortRows(data.filter(r => batchIds.has(String(r.batch_id ?? ''))), report));
     } catch (e: any) {
       if (id === reqId.current) { setError(friendlyError(e?.message || '')); setRows([]); }
     } finally { if (id === reqId.current) setLoading(false); }
-  }, [me, isAdmin, isTrainer, batch, day, session, dept, report]);
+  }, [me, isAdmin, isTrainer, batch, day, session, dept, report, batchIds]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (allBatches.length) load(); }, [load, allBatches.length]);
 
   // A "Full Day" filter only exists in the batch report
   useEffect(() => { if (report.id !== 'batch' && session === 'Full Day') setSession(''); }, [report.id, session]);
@@ -142,9 +149,10 @@ export default function Reports() {
   // ---- labels for file names and the PDF header ----
   const batchLabel = useMemo(() => {
     const b = batches.find(x => x.batch_id === (isTrainer ? me?.batchId : batch));
-    return b ? `Batch ${b.batch_no}` : 'All batches';
-  }, [batches, batch, isTrainer, me]);
+    return b ? b.batch_name : scopeLabel;
+  }, [batches, batch, isTrainer, me, scopeLabel]);
   const filterText = [
+    TRACK_NAME[scope.track],
     batchLabel,
     day ? `Day ${day}` : 'All days',
     report.sessionFilter ? (session || 'All sessions') : '',
@@ -214,19 +222,16 @@ export default function Reports() {
       <p className="-mt-2 text-sm text-slate-500">{report.blurb}</p>
 
       {/* filters */}
-      <div className="grid grid-cols-2 gap-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 md:grid-cols-4">
-        <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Batch
-          <select className={sel} value={isTrainer ? me?.batchId || '' : batch}
-            disabled={isTrainer} onChange={e => setBatch(e.target.value)}>
-            {isAdmin && <option value="">All batches</option>}
-            {batches.map(b => (
-              <option key={b.batch_id} value={b.batch_id}>
-                Batch {b.batch_no}{b.trainer_name ? ` · ${b.trainer_name}` : ''}
-              </option>
-            ))}
-          </select>
-        </label>
+      {isAdmin && <TrackBatchPicker scope={scope} setScope={setScope} trackBatches={trackBatches} isAdmin />}
+      <div className={`grid grid-cols-2 gap-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-4'}`}>
+        {!isAdmin && (
+          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Batch
+            <select className={sel} value={me?.batchId || ''} disabled>
+              {batches.map(b => <option key={b.batch_id} value={b.batch_id}>{b.batch_name}</option>)}
+            </select>
+          </label>
+        )}
         <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
           Day
           <select className={sel} value={day} onChange={e => setDay(e.target.value)}>

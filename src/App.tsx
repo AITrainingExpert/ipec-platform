@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './lib/auth';
 import Login from './components/Login';
+import CompleteUsn from './components/CompleteUsn';
 import Layout from './components/Layout';
 import ParticipantHome from './pages/ParticipantHome';
 import Quiz from './pages/Quiz';
@@ -25,10 +26,14 @@ import AdminDashboard from './pages/AdminDashboard';
 import Participants from './pages/Participants';
 import Reports from './pages/Reports';
 
+const usnStepSkipped = () => { try { return sessionStorage.getItem('ipec_skip_usn') === '1'; } catch { return false; } };
+
 function Shell() {
   const { user, loading } = useAuth();
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-400">Loading…</div>;
   if (!user) return <Login />;
+  // Registered before USN login? Ask for the USN once (it becomes their password).
+  if (user.role === 'participant' && !user.usn && !usnStepSkipped()) return <CompleteUsn />;
 
   const home = user.role === 'admin' ? '/admin' : user.role === 'trainer' ? '/trainer' : '/';
   const isParticipant = user.role === 'participant';

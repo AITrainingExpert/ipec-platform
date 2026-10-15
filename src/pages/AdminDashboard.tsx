@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { getUsers, getBatches, addBatch, getQuestions, setBatchTrack } from '../lib/db';
-import { User, Batch, Question, Track } from '../types';
+import { getUsers, getBatches, addBatch, getQuestions, setBatchTrack, getAllowedEmails } from '../lib/db';
+import { User, Batch, Question, Track, AllowedEmail } from '../types';
 import { HAS_SUPABASE } from '../lib/supabase';
 import { trackOfBatch, cachedBatches } from '../lib/tracks';
 import { TRACK_LABEL, drillsFor } from '../lib/bank';
@@ -10,6 +10,7 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState<User[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [allowed, setAllowed] = useState<AllowedEmail[]>([]);
   const [bName, setBName] = useState(''); const [bCollege, setBCollege] = useState('');
   const [bTrack, setBTrack] = useState<Track>('senior');
   const [msg, setMsg] = useState('');
@@ -18,6 +19,7 @@ export default function AdminDashboard() {
     getUsers().then(setUsers);
     getBatches().then(setBatches);
     getQuestions(true).then(setQuestions);
+    getAllowedEmails().then(setAllowed);
   };
   useEffect(() => { load(); }, []);
 
@@ -37,6 +39,9 @@ export default function AdminDashboard() {
   const count = (t: Track, d: number, s: string) => questions.filter(q => q.track === t && q.day === d && q.slot === s).length;
   const trainersOf = (id: string) => users.filter(u => u.role === 'trainer' && u.batchId === id).map(u => u.name).join(', ');
   const participantsOf = (id: string) => users.filter(u => u.role === 'participant' && u.batchId === id).length;
+  const enrolledOf = (id: string) => allowed.filter(a => a.batchId === id).length;
+  const trackOfId = Object.fromEntries(batches.map(b => [b.id, trackOfBatch(b)]));
+  const participantsIn = (t: Track) => users.filter(u => u.role === 'participant' && trackOfId[u.batchId || ''] === t).length;
 
   return (
     <div className="space-y-5">
@@ -46,8 +51,9 @@ export default function AdminDashboard() {
         Demo mode (browser storage). In production (Supabase connected) this console manages real users and batches.
       </div>}
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <KPI label="Participants" value={roleCount('participant')} />
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
+        <KPI label="Senior participants" value={participantsIn('senior')} />
+        <KPI label="Junior participants" value={participantsIn('junior')} />
         <KPI label="Trainers" value={roleCount('trainer')} />
         <KPI label="Junior batches" value={batches.filter(b => trackOfBatch(b) === 'junior').length} />
         <KPI label="Senior batches" value={batches.filter(b => trackOfBatch(b) === 'senior').length} />
@@ -64,7 +70,7 @@ export default function AdminDashboard() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs text-slate-500 border-b border-slate-100">
-              <tr><th className="text-left py-2">Batch</th><th className="text-left">Track</th><th className="text-left">Trainer</th><th className="text-center">Participants</th><th className="text-left">College</th></tr>
+              <tr><th className="text-left py-2">Batch</th><th className="text-left">Track</th><th className="text-left">Trainer</th><th className="text-center">Registered / Enrolled</th><th className="text-left">College</th></tr>
             </thead>
             <tbody>
               {batches.map(b => {
@@ -81,7 +87,7 @@ export default function AdminDashboard() {
                       {!b.track && <span className="ml-1 text-[10px] text-amber-600" title="Not saved yet — guessed from name/year">auto</span>}
                     </td>
                     <td className="text-slate-600 text-xs">{trainersOf(b.id) || <span className="text-slate-300">—</span>}</td>
-                    <td className="text-center">{participantsOf(b.id)}</td>
+                    <td className="text-center">{participantsOf(b.id)} <span className="text-slate-400">/ {enrolledOf(b.id)}</span></td>
                     <td className="text-slate-400 text-xs">{b.college}</td>
                   </tr>
                 );

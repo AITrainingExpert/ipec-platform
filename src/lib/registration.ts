@@ -41,24 +41,26 @@ export function branchCodeOf(saved?: string | null): string {
 }
 
 // ---------- USN ----------
-// VTU format: 1 digit, 2-letter college code, 2-digit year, 2-letter branch,
-// 3 digits.  e.g. 4SN23CS045
-export const USN_PATTERN = /^[1-4][A-Z]{2}\d{2}[A-Z]{2}\d{3}$/;
-export const USN_EXAMPLE = '4SN23CS045';
+// Two formats are in use:
+//   VTU (10):               4SN24CS001  = 4 + SN + 24 + CS + 001
+//   Srinivas University (11): 01SU24AI001 = 01 + SU + 24 + AI + 001
+export const USN_PATTERN = /^(?:[1-4][A-Z]{2}\d{2}[A-Z]{2}\d{3}|\d{2}[A-Z]{2}\d{2}[A-Z]{2}\d{3})$/;
+export const USN_EXAMPLE = '4SN24CS001';
+export const USN_MAX = 11;
 
 export const cleanUsn = (v: string) => (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 export function checkUsn(usn: string): string {
   if (!usn) return 'Enter your USN.';
-  if (usn.length < 10) return `USN is 10 characters, like ${USN_EXAMPLE}.`;
-  if (!USN_PATTERN.test(usn)) return `This doesn't look like a USN. It should look like ${USN_EXAMPLE}.`;
+  if (usn.length < 10) return `USN is 10 or 11 characters, like ${USN_EXAMPLE} or 01SU24AI001.`;
+  if (!USN_PATTERN.test(usn)) return `This doesn't look like a USN. It should look like ${USN_EXAMPLE} or 01SU24AI001.`;
   return '';
 }
 
 /** Branch code inside a USN (characters 6–7), if it is one of ours. */
 export function branchFromUsn(usn: string): string {
   if (!USN_PATTERN.test(usn)) return '';
-  const code = usn.slice(5, 7);
+  const code = usn.slice(-5, -3);
   return BRANCHES.some(b => b.code === code) ? code : '';
 }
 
@@ -120,4 +122,6 @@ export interface RegistrationCheck {
   email_registered: boolean;
   usn_registered: boolean;
   mobile_registered: boolean;
+  in_college_list?: boolean;           // email is on the imported college list
+  usn_matches_list?: boolean | null;   // null = nothing to compare
 }

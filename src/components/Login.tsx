@@ -5,7 +5,7 @@ import { Batch } from '../types';
 import { HAS_SUPABASE } from '../lib/supabase';
 import { trackOfBatch } from '../lib/tracks';
 import {
-  BRANCHES, FIXED_SEMESTER, FIXED_YEAR, USN_EXAMPLE, RegistrationCheck,
+  BRANCHES, FIXED_SEMESTER, FIXED_YEAR, USN_EXAMPLE, USN_MAX, RegistrationCheck,
   branchFromUsn, branchLabel, checkEmail, checkMobile, checkName, checkUsn,
   cleanEmail, cleanMobile, cleanName, cleanUsn,
 } from '../lib/registration';
@@ -95,7 +95,9 @@ export default function Login() {
       || (emailOk && check && check.email_registered ? 'This email is already registered. Use Sign In.' : '')
       || (emailOk && check && check.blocked ? 'Your access has been blocked. Please contact your trainer.' : '')
       || (emailOk && check && !check.enrolled ? 'This email is not on your college\'s list. Use the exact email you gave the college.' : ''),
-    usn: checkUsn(u) || (usnOk && check && check.usn_registered ? 'This USN is already registered. If it is yours, use Sign In.' : ''),
+    usn: checkUsn(u)
+      || (usnOk && check && check.usn_registered ? 'This USN is already registered. If it is yours, use Sign In.' : '')
+      || (usnOk && emailOk && check && check.usn_matches_list === false ? 'This USN does not match your college record for this email. Check both.' : ''),
     mobile: checkMobile(mobile),
     branch: branch ? '' : 'Select your branch.',
     batch: batchId ? '' : 'Select your batch.',
@@ -191,11 +193,13 @@ export default function Login() {
               {emailOk && <EmailStatus check={check} checking={checking} onSignIn={() => switchTo('signin')} />}
             </Row>
 
-            <Row label="USN (this is your password)" hint={`Capital letters and numbers, e.g. ${USN_EXAMPLE}`} err={show('usn') ? errors.usn : ''}>
+            <Row label="USN (this is your password)" hint={`Capital letters and numbers, e.g. ${USN_EXAMPLE} or 01SU24AI001`} err={show('usn') ? errors.usn : ''}>
               <input id="f-usn" className={inputCls(show('usn')) + ' font-mono tracking-widest uppercase'} value={u}
-                maxLength={10} autoComplete="off" autoCapitalize="characters" spellCheck={false}
+                maxLength={USN_MAX} autoComplete="off" autoCapitalize="characters" spellCheck={false}
                 onChange={ev => setUsn(cleanUsn(ev.target.value))} onBlur={touch('usn')} placeholder={USN_EXAMPLE} />
-              {usnOk && check && !check.usn_registered && <p className="text-[11px] text-emerald-700 mt-1 font-semibold">✓ USN looks right</p>}
+              {usnOk && check && !check.usn_registered && check.usn_matches_list !== false && (
+                <p className="text-[11px] text-emerald-700 mt-1 font-semibold">{check.usn_matches_list ? '✓ Matches your college record' : '✓ USN looks right'}</p>
+              )}
             </Row>
 
             <Row label="Mobile number" hint="Your own 10-digit number" err={show('mobile') ? errors.mobile : ''}>

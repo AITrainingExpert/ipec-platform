@@ -22,6 +22,19 @@ function read<T>(key: string, fallback: T): T {
 function write(key: string, val: any) { localStorage.setItem(key, JSON.stringify(val)); }
 function uid() { return 'id-' + Math.random().toString(36).slice(2, 10); }
 
+// Supabase returns at most 1000 rows per request. Read every page so large
+// batches never lose students or scores. `make` must build a fresh query.
+async function fetchAllRows(make: () => any): Promise<any[]> {
+  const out: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await make().range(from, from + 999);
+    if (error || !data) break;
+    out.push(...data);
+    if (data.length < 1000) break;
+  }
+  return out;
+}
+
 // ---- one-time demo seed ----
 export function ensureSeed() {
   if (HAS_SUPABASE) return;
@@ -286,10 +299,12 @@ export async function getMyDrills(userId: string): Promise<DrillResult[]> {
 
 export async function getBatchDrills(batchId?: string): Promise<DrillResult[]> {
   if (HAS_SUPABASE && supabase) {
-    let q = supabase.from('drill_results').select('*').order('completed_at', { ascending: false });
-    if (batchId) q = q.eq('batch_id', batchId);
-    const { data } = await q;
-    return (data || []).map(mapDrill);
+    const data = await fetchAllRows(() => {
+      let q = supabase!.from('drill_results').select('*').order('completed_at', { ascending: false }).order('id');
+      if (batchId) q = q.eq('batch_id', batchId);
+      return q;
+    });
+    return data.map(mapDrill);
   }
   const all = read<DrillResult[]>(LS.drills, []);
   return batchId ? all.filter(r => r.batchId === batchId) : all;
@@ -313,10 +328,12 @@ export async function getMyResults(userId: string): Promise<QuizResult[]> {
 
 export async function getBatchResults(batchId?: string): Promise<QuizResult[]> {
   if (HAS_SUPABASE && supabase) {
-    let q = supabase.from('results').select('*').order('completed_at', { ascending: false });
-    if (batchId) q = q.eq('batch_id', batchId);
-    const { data } = await q;
-    return (data || []).map(mapResult);
+    const data = await fetchAllRows(() => {
+      let q = supabase!.from('results').select('*').order('completed_at', { ascending: false }).order('id');
+      if (batchId) q = q.eq('batch_id', batchId);
+      return q;
+    });
+    return data.map(mapResult);
   }
   const all = read<QuizResult[]>(LS.results, []);
   return batchId ? all.filter(r => r.batchId === batchId) : all;
@@ -335,8 +352,8 @@ function mapResult(r: any): QuizResult {
 // ---- USERS & BATCHES (admin/trainer) ----
 export async function getUsers(): Promise<User[]> {
   if (HAS_SUPABASE && supabase) {
-    const { data } = await supabase.from('profiles').select('*');
-    return (data || []).map((p: any) => ({ id: p.id, name: p.name, email: p.email, role: p.role,
+    const data = await fetchAllRows(() => supabase!.from('profiles').select('*').order('created_at').order('id'));
+    return data.map((p: any) => ({ id: p.id, name: p.name, email: p.email, role: p.role,
       mobile: p.mobile, branch: p.branch, year: p.year, college: p.college, batchId: p.batch_id,
       usn: p.usn || undefined, semester: p.semester || undefined, createdAt: p.created_at }));
   }
@@ -398,10 +415,13 @@ export async function isEmailAllowed(email: string): Promise<boolean> {
 
 export async function getAllowedEmails(batchId?: string): Promise<AllowedEmail[]> {
   if (HAS_SUPABASE && supabase) {
-    let q = supabase.from('allowed_emails').select('*').order('created_at', { ascending: false });
-    if (batchId) q = q.eq('batch_id', batchId);
-    const { data } = await q;
-    return (data || []).map((a: any) => ({ email: a.email, batchId: a.batch_id, addedBy: a.added_by, createdAt: a.created_at }));
+    const data = await fetchAllRows(() => {
+      let q = supabase!.from('allowed_emails').select('*').order('created_at', { ascending: false }).order('email');
+      if (batchId) q = q.eq('batch_id', batchId);
+      return q;
+    });
+    return data.map((a: any) => ({ email: a.email, batchId: a.batch_id, addedBy: a.added_by, createdAt: a.created_at,
+      isBlocked: !!a.is_blocked, usn: a.usn || undefined, name: a.name || undefined } as AllowedEmail));
   }
   const list = read<AllowedEmail[]>(LS.allowed, []);
   return batchId ? list.filter(a => a.batchId === batchId) : list;
@@ -602,10 +622,12 @@ export async function saveFeedback(f: Feedback) {
 
 export async function getFeedback(batchId?: string): Promise<Feedback[]> {
   if (HAS_SUPABASE && supabase) {
-    let q = supabase.from('feedback').select('*').order('created_at', { ascending: false });
-    if (batchId) q = q.eq('batch_id', batchId);
-    const { data } = await q;
-    return (data || []).map(mapFeedback);
+    const data = await fetchAllRows(() => {
+      let q = supabase!.from('feedback').select('*').order('created_at', { ascending: false }).order('id');
+      if (batchId) q = q.eq('batch_id', batchId);
+      return q;
+    });
+    return data.map(mapFeedback);
   }
   const all = read<Feedback[]>(LS.feedback, []);
   return batchId ? all.filter(f => f.batchId === batchId) : all;
@@ -1049,4 +1071,33 @@ export async function adminDeleteStudent(userId: string): Promise<{ ok: boolean;
   if (has) return { ok: false, msg: adminMsg('HAS_RECORDS') };
   write(LS.users, read<User[]>(LS.users, []).filter(u => u.id !== userId));
   return { ok: true, msg: 'Deleted' };
+}
+
+/**
+ * Students who registered before USN login: save their USN once and make it
+ * their password. The database allows a student to set their own USN only
+ * while it is still empty (registration-upgrade.sql, profiles_guard).
+ */
+export async function completeMyUsn(user: User, usn: string): Promise<{ ok: boolean; msg: string; passwordSet: boolean }> {
+  if (HAS_SUPABASE && supabase) {
+    const chk = await checkRegistration(user.email, usn);
+    if (chk?.usn_registered) return { ok: false, passwordSet: false, msg: 'This USN is already registered to another account. Check it, or ask your trainer.' };
+    if (chk?.usn_matches_list === false) return { ok: false, passwordSet: false, msg: 'This USN does not match your college record. Please check it.' };
+    const { data, error } = await supabase.from('profiles').update({ usn }).eq('id', user.id).select('usn');
+    // Database not upgraded yet (no usn column): never trap the student on this screen.
+    if (error && /usn|schema cache|column/i.test(error.message) && !/duplicate|unique/i.test(error.message)) {
+      try { sessionStorage.setItem('ipec_skip_usn', '1'); } catch { /* ignore */ }
+      return { ok: false, passwordSet: false, msg: 'NOT_READY' };
+    }
+    if (error) return { ok: false, passwordSet: false, msg: /duplicate|unique/i.test(error.message)
+      ? 'This USN is already registered to another account. Check it, or ask your trainer.' : error.message };
+    if (!data || !data.length || data[0].usn !== usn) return { ok: false, passwordSet: false, msg: 'Could not save your USN. Please ask your trainer.' };
+    const pw = await supabase.auth.updateUser({ password: usn });
+    return { ok: true, passwordSet: !pw.error, msg: pw.error ? pw.error.message : 'Saved' };
+  }
+  const users = read<User[]>(LS.users, []);
+  if (users.some(u => u.id !== user.id && (u.usn || '').toUpperCase() === usn)) return { ok: false, passwordSet: false, msg: 'This USN is already registered to another account.' };
+  write(LS.users, users.map(u => (u.id === user.id ? { ...u, usn } : u)));
+  localStorage.setItem('ipec_pw_' + user.email, usn);
+  return { ok: true, passwordSet: true, msg: 'Saved' };
 }

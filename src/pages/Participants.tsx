@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { getUsers, getBatches, getAllowedEmails, adminUpdateStudent, adminDeleteStudent } from '../lib/db';
 import { trackOfBatch, cachedBatches } from '../lib/tracks';
-import { Batch, Track, User } from '../types';
+import { AllowedEmail, Batch, Track, User } from '../types';
+import TrackBatchPicker, { useScope, TRACK_NAME } from '../components/TrackBatchPicker';
 import {
-  BRANCHES, USN_EXAMPLE, branchCodeOf, branchLabel, checkEmail, checkMobile, checkUsn,
+  BRANCHES, USN_EXAMPLE, USN_MAX, branchCodeOf, branchLabel, checkEmail, checkMobile, checkUsn,
   cleanEmail, cleanMobile, cleanName, cleanUsn,
 } from '../lib/registration';
 
@@ -30,10 +31,11 @@ export default function Participants() {
   const isAdmin = user?.role === 'admin';
   const [users, setUsers] = useState<User[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [allowed, setAllowed] = useState<AllowedEmail[]>([]);
   const [blocked, setBlocked] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [fTrack, setFTrack] = useState<'all' | Track>('all');
-  const [fBatch, setFBatch] = useState<string>('all');
+  const { scope, setScope, trackBatches, batchIds, label } = useScope(user, batches);
+  const [view, setView] = useState<'registered' | 'pending'>('registered');
   const [onlyDups, setOnlyDups] = useState(false);
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<Person | null>(null);
@@ -43,7 +45,7 @@ export default function Participants() {
     setLoading(true);
     Promise.all([getUsers(), getBatches(), getAllowedEmails()])
       .then(([u, b, a]) => {
-        setUsers(u || []); setBatches(b || []);
+        setUsers(u || []); setBatches(b || []); setAllowed(a || []);
         setBlocked(new Set((a || []).filter((x: any) => x.isBlocked || x.is_blocked).map(x => x.email)));
       })
       .finally(() => setLoading(false));
@@ -54,7 +56,7 @@ export default function Participants() {
 
   // Possible duplicates: same USN, same mobile, or same name in the same batch.
   const all: Person[] = useMemo(() => {
-    const students = users.filter(u => u.role === 'participant').filter(u => isAdmin || u.batchId === user?.batchId);
+    const students = users.filter(u => u.role === 'participant').filter(u => batchIds.has(u.batchId || ''));
     const count = (key: (u: User) => string) => {
       const m = new Map<string, number>();
       students.forEach(u => { const k = key(u); if (k) m.set(k, (m.get(k) || 0) + 1); });
@@ -68,11 +70,22 @@ export default function Participants() {
       const dupWhy = [sameUsn(u) && 'same USN', sameMobile(u) && 'same mobile', sameName(u) && 'same name'].filter(Boolean) as string[];
       return { ...u, batchName: b?.name || u.batchId || '—', track: trackOfBatch(b, u.year) as Track, dupWhy };
     });
-  }, [users, batchById, isAdmin, user?.batchId]);
+  }, [users, batchById, batchIds]);
+
+  // Enrolled (college list / enrolment) vs registered, per batch of the chosen track
+  const registeredEmails = useMemo(() => new Set(users.map(u => String(u.email || '').toLowerCase())), [users]);
+  const enrolledIn = (bid: string) => allowed.filter(a => a.batchId === bid);
+  const regCount = (bid: string) => users.filter(u => u.role === 'participant' && u.batchId === bid).length;
+  const usnCount = (bid: string) => users.filter(u => u.role === 'participant' && u.batchId === bid && u.usn).length;
+  const pending = allowed
+    .filter(a => batchIds.has(a.batchId) && !registeredEmails.has(String(a.email || '').toLowerCase()))
+    .filter(a => { const s = q.trim().toLowerCase(); return !s || [a.name, a.email, a.usn].some(v => String(v || '').toLowerCase().includes(s)); })
+    .sort((a, b) => String(batchById[a.batchId]?.name || '').localeCompare(String(batchById[b.batchId]?.name || ''), undefined, { numeric: true })
+      || String(a.usn || a.email).localeCompare(String(b.usn || b.email)));
+  const scopeBatches = trackBatches.filter(b => batchIds.has(b.id));
 
   const dupCount = all.filter(p => p.dupWhy.length).length;
   const people = all
-    .filter(u => (fTrack === 'all' || u.track === fTrack) && (fBatch === 'all' || u.batchId === fBatch))
     .filter(u => !onlyDups || u.dupWhy.length > 0)
     .filter(u => {
       const s = q.trim().toLowerCase();
@@ -92,8 +105,18 @@ export default function Participants() {
     const body = [header, ...rows].map((r, ri) => r.map((c, ci) => (ri > 0 && ci === 4 && c ? csvCell(`="${c}"`) : csvCell(c))).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
-    const tag = onlyDups ? 'possible-duplicates' : fBatch !== 'all' ? (batchById[fBatch]?.name || fBatch) : fTrack !== 'all' ? fTrack : 'all';
+    const tag = (onlyDups ? 'possible-duplicates-' : '') + `${scope.track}-${label}`;
     a.href = URL.createObjectURL(blob); a.download = `participants-${tag.replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+  };
+
+  const downloadPending = () => {
+    if (!isAdmin) return;
+    const header = ['S.No', 'Batch', 'USN', 'Name', 'Email', 'Status'];
+    const rows = pending.map((a, i) => [i + 1, batchById[a.batchId]?.name || a.batchId, a.usn, a.name, a.email, 'Not registered yet']);
+    const body = [header, ...rows].map(r => r.map(csvCell).join(',')).join('\r\n');
+    const el = document.createElement('a');
+    el.href = URL.createObjectURL(new Blob(['\uFEFF' + body], { type: 'text/csv;charset=utf-8' }));
+    el.download = `not-registered-${scope.track}-${label.replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.csv`; el.click();
   };
 
   const sel = 'border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm bg-white';
@@ -108,35 +131,75 @@ export default function Participants() {
             {isAdmin ? ' Click Edit to correct a wrong entry or reset a password.' : ''}
           </p>
         </div>
-        {isAdmin && <button onClick={download} disabled={!people.length} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50">⬇ Download CSV ({people.length})</button>}
+        {isAdmin && (view === 'registered'
+          ? <button onClick={download} disabled={!people.length} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50">⬇ Download CSV ({people.length})</button>
+          : <button onClick={downloadPending} disabled={!pending.length} className="bg-brand text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50">⬇ Download not-registered list ({pending.length})</button>)}
+      </div>
+
+      <TrackBatchPicker scope={scope} setScope={setScope} trackBatches={trackBatches} isAdmin={isAdmin}
+        counts={Object.fromEntries(trackBatches.map(b => [b.id, regCount(b.id)]))} />
+
+      {/* batch-wise counts for the chosen track */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        {scopeBatches.map(b => {
+          const en = enrolledIn(b.id).length, rg = regCount(b.id), un = usnCount(b.id);
+          return (
+            <button key={b.id} onClick={() => isAdmin && setScope({ ...scope, batchId: scope.batchId === b.id ? '' : b.id })}
+              className={`text-left bg-white border rounded-xl px-3 py-2 ${scope.batchId === b.id ? 'border-brand ring-1 ring-brand' : 'border-slate-200 hover:border-slate-300'}`}>
+              <div className="text-xs font-bold text-slate-500">{b.name}</div>
+              <div className="text-lg font-extrabold text-slate-800">{rg}<span className="text-sm font-semibold text-slate-400"> / {en || '—'}</span></div>
+              <div className="text-[11px] text-slate-500">registered / enrolled · USN {un}/{rg}</div>
+              {en > 0 && <div className="h-1.5 bg-slate-100 rounded-full mt-1"><div className="h-1.5 bg-emerald-500 rounded-full" style={{ width: Math.min(100, Math.round(100 * rg / en)) + '%' }} /></div>}
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex flex-wrap gap-2 items-center">
-        {isAdmin && <>
-          <select className={sel} value={fTrack} onChange={e => { setFTrack(e.target.value as any); setFBatch('all'); }}>
-            <option value="all">All tracks</option><option value="junior">Junior Champions</option><option value="senior">Senior Champions</option>
-          </select>
-          <select className={sel} value={fBatch} onChange={e => setFBatch(e.target.value)}>
-            <option value="all">All batches</option>
-            {batches.filter(b => fTrack === 'all' || trackOfBatch(b) === fTrack).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        </>}
-        <button onClick={() => setOnlyDups(v => !v)}
+        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+          <button onClick={() => setView('registered')} className={`px-3 py-1.5 text-sm font-bold rounded-md ${view === 'registered' ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>Registered ({all.length})</button>
+          <button onClick={() => { setView('pending'); setOnlyDups(false); }} className={`px-3 py-1.5 text-sm font-bold rounded-md ${view === 'pending' ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>Not registered yet ({pending.length})</button>
+        </div>
+        {view === 'registered' && <button onClick={() => setOnlyDups(v => !v)}
           className={`text-sm font-semibold rounded-lg px-3 py-1.5 border ${onlyDups ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-amber-700 border-amber-300'}`}>
           ⚠ Possible duplicates ({dupCount})
-        </button>
+        </button>}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, USN, email, mobile…" className={sel + ' flex-1 min-w-48'} />
         {msg && <span className="text-xs text-emerald-600">{msg}</span>}
       </div>
 
-      {onlyDups && (
+      {view === 'registered' && onlyDups && (
         <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2.5">
           These accounts share a USN, a mobile number, or the same name in one batch. Usually one student registered twice.
           Open the wrong one and use <b>Delete duplicate</b>. An account that already has quiz or drill scores is kept; correct it with Edit instead.
         </p>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+      {view === 'pending' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+          <p className="text-xs text-slate-500 px-3 pt-3">Enrolled for {TRACK_NAME[scope.track]} · {label}, but no account yet. Share this list with the trainer.</p>
+          <table className="w-full text-sm mt-2">
+            <thead className="bg-slate-50 text-xs text-slate-500"><tr>
+              <th className="text-left px-3 py-2">#</th><th className="text-left px-3">Batch</th><th className="text-left px-3">USN</th>
+              <th className="text-left px-3">Name</th><th className="text-left px-3">Email</th></tr></thead>
+            <tbody>
+              {loading && <tr><td colSpan={5} className="text-center text-slate-400 py-8">Loading…</td></tr>}
+              {!loading && pending.length === 0 && <tr><td colSpan={5} className="text-center text-slate-400 py-8">Everyone enrolled here has registered. 🎉</td></tr>}
+              {pending.map((a, i) => (
+                <tr key={a.email + a.batchId} className="border-t border-slate-100">
+                  <td className="px-3 py-2 text-slate-400">{i + 1}</td>
+                  <td className="px-3 whitespace-nowrap">{batchById[a.batchId]?.name || a.batchId}</td>
+                  <td className="px-3 font-mono text-xs">{a.usn || '—'}</td>
+                  <td className="px-3 font-semibold text-slate-700">{a.name || '—'}</td>
+                  <td className="px-3 text-slate-500">{a.email}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {view === 'registered' && <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
@@ -148,7 +211,7 @@ export default function Participants() {
           </thead>
           <tbody>
             {loading && <tr><td colSpan={10} className="text-center text-slate-400 py-8">Loading…</td></tr>}
-            {!loading && people.length === 0 && <tr><td colSpan={10} className="text-center text-slate-400 py-8">No participants match.</td></tr>}
+            {!loading && people.length === 0 && <tr><td colSpan={10} className="text-center text-slate-400 py-8">No one has registered yet in {label}. See “Not registered yet”.</td></tr>}
             {people.map((u, i) => {
               const isBlocked = blocked.has(String(u.email || '').toLowerCase());
               return (
@@ -172,7 +235,7 @@ export default function Participants() {
             })}
           </tbody>
         </table>
-      </div>
+      </div>}
 
       {editing && <EditDialog u={editing} batches={batches} onClose={() => setEditing(null)}
         onSaved={(m) => { setEditing(null); setMsg(m); cachedBatches(true); load(); }} />}
@@ -247,7 +310,7 @@ function EditDialog({ u, batches, onClose, onSaved }: { u: Person; batches: Batc
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-xs font-bold text-slate-500">USN (password)
-            <input className={inp + ' font-mono uppercase'} value={f.usn} maxLength={10} placeholder={USN_EXAMPLE}
+            <input className={inp + ' font-mono uppercase'} value={f.usn} maxLength={USN_MAX} placeholder={USN_EXAMPLE}
               onChange={e => setF(s => ({ ...s, usn: cleanUsn(e.target.value) }))} />
           </label>
           <label className="block text-xs font-bold text-slate-500">Mobile<input className={inp} value={f.mobile} inputMode="numeric" onChange={set('mobile')} /></label>
