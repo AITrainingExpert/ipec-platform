@@ -10,6 +10,8 @@ export interface User {
   year?: string;
   college?: string;
   batchId?: string;
+  usn?: string;           // also the student's password
+  semester?: string;
   createdAt: string;
 }
 

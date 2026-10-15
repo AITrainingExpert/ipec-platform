@@ -23,7 +23,8 @@ export default function CertificatePage() {
   const [settings, setSettings] = useState<CertSettings | null>(null);
   const [results, setResults] = useState<QuizResult[]>([]);
   const [drills, setDrills] = useState<DrillResult[]>([]);
-  const [usn, setUsn] = useState('');
+  const [usn, setUsn] = useState(user?.usn || '');
+  useEffect(() => { if (user?.usn) setUsn(u => u || user.usn!); }, [user?.usn]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);

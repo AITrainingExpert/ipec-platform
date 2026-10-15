@@ -49,16 +49,22 @@ export function ensureSeed() {
 // Demo: simple local accounts.
 // Pending profile data is passed at signup and written once the session exists.
 
-type ProfileInput = { name: string; role: Role; mobile?: string; branch?: string; year?: string; college?: string; batchId?: string };
+type ProfileInput = { name: string; role: Role; mobile?: string; branch?: string; year?: string; college?: string; batchId?: string; usn?: string; semester?: string };
 
 async function writeProfile(userId: string, email: string, p: ProfileInput): Promise<User> {
   const u: User = { id: userId, email, name: p.name, role: p.role, mobile: p.mobile,
-    branch: p.branch, year: p.year, college: p.college, batchId: p.batchId, createdAt: new Date().toISOString() };
+    branch: p.branch, year: p.year, college: p.college, batchId: p.batchId,
+    usn: p.usn, semester: p.semester, createdAt: new Date().toISOString() };
   if (HAS_SUPABASE && supabase) {
-    await supabase.from('profiles').upsert({
+    const row: Record<string, any> = {
       id: u.id, name: u.name, email: u.email, role: u.role, mobile: u.mobile,
       branch: u.branch, year: u.year, college: u.college, batch_id: u.batchId,
-    });
+    };
+    if (p.usn) row.usn = p.usn;
+    if (p.semester) row.semester = p.semester;
+    const { error } = await supabase.from('profiles').upsert(row);
+    // Database not upgraded yet (no usn/semester columns): save the rest.
+    if (error && (p.usn || p.semester)) { delete row.usn; delete row.semester; await supabase.from('profiles').upsert(row); }
   }
   return u;
 }
@@ -72,7 +78,8 @@ export async function signUp(email: string, password: string, profile: ProfileIn
     if (!allowed) return { ok: false, msg: 'This email is not enrolled for any training batch. Please contact your trainer/admin.' };
     // Force the participant into the batch their email was enrolled into,
     // regardless of what the form defaulted to. Fix for students landing in batch-1.
-    profile = { ...profile, batchId: await batchForEmail(email, profile.batchId || 'batch-1') };
+    // The student now picks their batch on the form; fall back to the enrolled batch.
+    profile = { ...profile, batchId: profile.batchId || await batchForEmail(email, 'batch-1') };
   }
   if (HAS_SUPABASE && supabase) {
     const { data, error } = await supabase.auth.signUp({
@@ -81,9 +88,10 @@ export async function signUp(email: string, password: string, profile: ProfileIn
         name: profile.name, role: profile.role, mobile: profile.mobile,
         branch: profile.branch, year: profile.year, college: profile.college,
         batch_id: profile.batchId || 'batch-1',
+        usn: profile.usn, semester: profile.semester,
       } },
     });
-    if (error) return { ok: false, msg: error.message };
+    if (error) return { ok: false, msg: friendlySignUpError(error.message) };
     if (!data.user) return { ok: false, msg: 'Sign up failed. Please try again.' };
     // If email confirmation is OFF, a session exists now and we can write the profile immediately.
     if (data.session) {
@@ -99,7 +107,8 @@ export async function signUp(email: string, password: string, profile: ProfileIn
   if (users.find(x => x.email === email)) return { ok: false, msg: 'Account already exists — please sign in.' };
   const u: User = { id: uid(), email, name: profile.name, role: profile.role, mobile: profile.mobile,
     branch: profile.branch, year: profile.year, college: profile.college,
-    batchId: profile.batchId || 'batch-1', createdAt: new Date().toISOString() };
+    batchId: profile.batchId || 'batch-1', usn: profile.usn, semester: profile.semester, createdAt: new Date().toISOString() };
+  if (u.usn && users.some(x => (x.usn || '').toUpperCase() === u.usn!.toUpperCase())) return { ok: false, msg: friendlySignUpError('usn') };
   users.push(u); write(LS.users, users);
   localStorage.setItem('ipec_pw_' + email, password);
   write(LS.session, u);
@@ -108,9 +117,17 @@ export async function signUp(email: string, password: string, profile: ProfileIn
 
 // Sign in to an existing account.
 export async function signIn(email: string, password: string): Promise<{ ok: boolean; user?: User; msg: string }> {
+  email = email.trim().toLowerCase();
   if (HAS_SUPABASE && supabase) {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { ok: false, msg: error.message };
+    // 1st try exactly as typed (staff + older accounts), then the USN in capitals.
+    let { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const asUsn = password.toUpperCase().replace(/\s+/g, '');
+    if (error && asUsn !== password) {
+      const retry = await supabase.auth.signInWithPassword({ email, password: asUsn });
+      if (!retry.error) { data = retry.data; error = null; }
+    }
+    if (error) return { ok: false, msg: /invalid login credentials/i.test(error.message)
+      ? 'Email or password is wrong. Students: use your college email and your USN as the password.' : error.message };
     if (!data.user) return { ok: false, msg: 'Sign in failed.' };
     // Check if participant is blocked (only for participants — staff are never in allowlist)
     const { data: prof0 } = await supabase.from('profiles').select('role').eq('id', data.user.id).maybeSingle();
@@ -145,14 +162,24 @@ export async function signIn(email: string, password: string): Promise<{ ok: boo
   const u = users.find(x => x.email === email);
   if (!u) return { ok: false, msg: 'No account found — please register.' };
   const savedPw = localStorage.getItem('ipec_pw_' + email);
-  if (savedPw && savedPw !== password) return { ok: false, msg: 'Incorrect password.' };
+  if (savedPw && savedPw !== password && savedPw !== password.toUpperCase().replace(/\s+/g, '')) return { ok: false, msg: 'Incorrect password.' };
   write(LS.session, u);
   return { ok: true, user: u, msg: 'Signed in' };
 }
 
 function mapProfile(prof: any): User {
   return { id: prof.id, name: prof.name, email: prof.email, role: prof.role, mobile: prof.mobile,
-    branch: prof.branch, year: prof.year, college: prof.college, batchId: prof.batch_id, createdAt: prof.created_at };
+    branch: prof.branch, year: prof.year, college: prof.college, batchId: prof.batch_id,
+    usn: prof.usn || undefined, semester: prof.semester || undefined, createdAt: prof.created_at };
+}
+
+function friendlySignUpError(msg: string): string {
+  if (/already registered|already been registered|already exists/i.test(msg))
+    return 'This email is already registered. Use Sign In with your email and USN.';
+  if (/database error saving new user|duplicate key|usn/i.test(msg))
+    return 'This USN is already registered. If it is yours, use Sign In. Otherwise ask your trainer.';
+  if (/password/i.test(msg)) return 'Your USN could not be used as the password: ' + msg;
+  return msg;
 }
 
 export async function getSession(): Promise<User | null> {
@@ -310,7 +337,8 @@ export async function getUsers(): Promise<User[]> {
   if (HAS_SUPABASE && supabase) {
     const { data } = await supabase.from('profiles').select('*');
     return (data || []).map((p: any) => ({ id: p.id, name: p.name, email: p.email, role: p.role,
-      mobile: p.mobile, branch: p.branch, year: p.year, college: p.college, batchId: p.batch_id, createdAt: p.created_at }));
+      mobile: p.mobile, branch: p.branch, year: p.year, college: p.college, batchId: p.batch_id,
+      usn: p.usn || undefined, semester: p.semester || undefined, createdAt: p.created_at }));
   }
   return read<User[]>(LS.users, []);
 }
@@ -936,4 +964,89 @@ export async function updateParticipantProfile(user: User, patch: ProfilePatch):
     write(LS.allowed, list);
   }
   return { ok: true, msg: 'Saved' };
+}
+
+// ============================================================
+// STUDENT REGISTRATION CHECKS + ADMIN STUDENT TOOLS
+// (database side: registration-upgrade.sql)
+// ============================================================
+import type { RegistrationCheck } from './registration';
+
+/** Live check used by the Register screen (works before login). Null = could not check. */
+export async function checkRegistration(email?: string, usn?: string, mobile?: string): Promise<RegistrationCheck | null> {
+  const e = (email || '').trim().toLowerCase();
+  const u = (usn || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const m = (mobile || '').replace(/\D/g, '').slice(-10);
+  if (HAS_SUPABASE && supabase) {
+    const { data, error } = await supabase.rpc('registration_check', { p_email: e || null, p_usn: u || null, p_mobile: m || null });
+    if (error || !data) return null;
+    return data as RegistrationCheck;
+  }
+  const allowed = read<any[]>(LS.allowed, []);
+  const users = read<User[]>(LS.users, []);
+  const hit = allowed.find(a => a.email === e);
+  const batch = hit ? read<Batch[]>(LS.batches, []).find(b => b.id === hit.batchId) : undefined;
+  return {
+    enrolled: allowed.length === 0 ? true : !!hit, blocked: !!hit?.isBlocked,
+    enrolled_batch: hit?.batchId || null, enrolled_batch_name: batch?.name || null,
+    email_registered: !!e && users.some(x => x.email === e),
+    usn_registered: !!u && users.some(x => (x.usn || '').toUpperCase() === u),
+    mobile_registered: m.length === 10 && users.some(x => (x.mobile || '').replace(/\D/g, '').slice(-10) === m),
+  };
+}
+
+export interface StudentEdit {
+  name: string; email: string; usn: string; mobile: string;
+  branch: string; semester: string; batchId: string;
+  resetPassword: boolean;
+}
+
+const ADMIN_ERRORS: [RegExp, string][] = [
+  [/NOT_ALLOWED/, 'Only the admin can do this.'],
+  [/USN_TAKEN/, 'This USN is already registered to another student.'],
+  [/EMAIL_TAKEN/, 'This email is already used by another account.'],
+  [/BAD_EMAIL/, 'The email address is not valid.'],
+  [/BAD_USN/, 'USN must be capital letters and numbers only.'],
+  [/NO_USN/, 'Enter the USN first, then reset the password.'],
+  [/HAS_RECORDS/, 'This account already has quiz / drill / feedback records, so it can\'t be deleted. Edit it instead.'],
+  [/NOT_A_STUDENT/, 'Trainer and admin accounts are not changed here.'],
+  [/admin_update_student|admin_delete_student|could not find the function/i, 'Run registration-upgrade.sql in Supabase once to turn on student editing.'],
+];
+const adminMsg = (m: string) => (ADMIN_ERRORS.find(([re]) => re.test(m))?.[1]) || m;
+
+/** Admin: correct a student's details. Changing the USN (or ticking reset) sets the password to the USN. */
+export async function adminUpdateStudent(userId: string, f: StudentEdit): Promise<{ ok: boolean; msg: string; passwordSet?: boolean }> {
+  if (HAS_SUPABASE && supabase) {
+    const { data, error } = await supabase.rpc('admin_update_student', {
+      p_user: userId, p_name: f.name, p_email: f.email, p_usn: f.usn || null, p_mobile: f.mobile || null,
+      p_branch: f.branch || null, p_semester: f.semester || null, p_batch: f.batchId || null,
+      p_reset_password: f.resetPassword,
+    });
+    if (error) return { ok: false, msg: adminMsg(error.message) };
+    return { ok: true, msg: 'Saved', passwordSet: !!(data as any)?.password_set_to_usn };
+  }
+  const users = read<User[]>(LS.users, []);
+  const i = users.findIndex(u => u.id === userId);
+  if (i < 0) return { ok: false, msg: 'User not found' };
+  if (f.usn && users.some(u => u.id !== userId && (u.usn || '').toUpperCase() === f.usn.toUpperCase())) return { ok: false, msg: adminMsg('USN_TAKEN') };
+  const oldEmail = users[i].email;
+  const usnChanged = (users[i].usn || '') !== f.usn;
+  users[i] = { ...users[i], name: f.name, email: f.email, usn: f.usn || undefined, mobile: f.mobile, branch: f.branch,
+    semester: f.semester, year: ['1st', '2nd', '3rd', '4th'][Math.ceil(Number(f.semester) / 2) - 1] || users[i].year, batchId: f.batchId };
+  write(LS.users, users);
+  const setPw = !!f.usn && (f.resetPassword || usnChanged);
+  if (setPw) { localStorage.removeItem('ipec_pw_' + oldEmail); localStorage.setItem('ipec_pw_' + f.email, f.usn); }
+  return { ok: true, msg: 'Saved', passwordSet: setPw };
+}
+
+/** Admin: delete a duplicate account. Refused if it has any quiz / drill / feedback record. */
+export async function adminDeleteStudent(userId: string): Promise<{ ok: boolean; msg: string }> {
+  if (HAS_SUPABASE && supabase) {
+    const { error } = await supabase.rpc('admin_delete_student', { p_user: userId });
+    return error ? { ok: false, msg: adminMsg(error.message) } : { ok: true, msg: 'Deleted' };
+  }
+  const has = read<any[]>(LS.results, []).some(r => r.userId === userId) || read<any[]>(LS.drills, []).some(r => r.userId === userId);
+  if (has) return { ok: false, msg: adminMsg('HAS_RECORDS') };
+  write(LS.users, read<User[]>(LS.users, []).filter(u => u.id !== userId));
+  return { ok: true, msg: 'Deleted' };
 }
