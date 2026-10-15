@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getUsers, getBatches, addBatch, getQuestions, setBatchTrack, getAllowedEmails } from '../lib/db';
+import { getUsers, getBatches, addBatch, getQuestions, setBatchTrack, getAllowedEmails, adminSetTrainerBatch } from '../lib/db';
 import { User, Batch, Question, Track, AllowedEmail } from '../types';
 import { HAS_SUPABASE } from '../lib/supabase';
 import { trackOfBatch, cachedBatches } from '../lib/tracks';
@@ -36,6 +36,15 @@ export default function AdminDashboard() {
   };
 
   const roleCount = (r: string) => users.filter(u => u.role === r).length;
+  const trainers = users.filter(u => u.role === 'trainer').sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email), undefined, { numeric: true }));
+  const assignTrainer = async (b: Batch, trainerId: string) => {
+    if (!trainerId) return;
+    const t = trainers.find(x => x.id === trainerId);
+    const r = await adminSetTrainerBatch(trainerId, b.id);
+    setMsg(r.ok ? `${t?.name || 'Trainer'} now trains ${b.name}.` : r.msg);
+    load();
+  };
+  const trainersOnJunior = trainers.filter(t => { const b = batches.find(x => x.id === t.batchId); return !b || trackOfBatch(b) !== 'senior'; });
   const count = (t: Track, d: number, s: string) => questions.filter(q => q.track === t && q.day === d && q.slot === s).length;
   const trainersOf = (id: string) => users.filter(u => u.role === 'trainer' && u.batchId === id).map(u => u.name).join(', ');
   const participantsOf = (id: string) => users.filter(u => u.role === 'participant' && u.batchId === id).length;
@@ -66,7 +75,13 @@ export default function AdminDashboard() {
           <h2 className="font-bold text-slate-800">Batches & tracks</h2>
           {msg && <span className="text-xs text-emerald-600">{msg}</span>}
         </div>
-        <p className="text-xs text-slate-500 mb-3">The track decides which syllabus a batch's quizzes, drills and bootcamp use. All batches can run at the same time.</p>
+        <p className="text-xs text-slate-500 mb-3">The track decides which syllabus a batch's quizzes, drills and bootcamp use. All batches can run at the same time. Pick a trainer in the Trainer column to move them to that batch: a trainer sees only their own batch.</p>
+        {trainersOnJunior.length > 0 && batches.some(b => trackOfBatch(b) === 'senior') && (
+          <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2.5 mb-3">
+            {trainersOnJunior.length} trainer{trainersOnJunior.length > 1 ? 's are' : ' is'} still on a Junior batch (or none): {trainersOnJunior.map(t => t.name || t.email).join(', ')}.
+            They will only see that batch's data. Assign them to their Senior batch below.
+          </p>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs text-slate-500 border-b border-slate-100">
@@ -86,7 +101,15 @@ export default function AdminDashboard() {
                       </select>
                       {!b.track && <span className="ml-1 text-[10px] text-amber-600" title="Not saved yet — guessed from name/year">auto</span>}
                     </td>
-                    <td className="text-slate-600 text-xs">{trainersOf(b.id) || <span className="text-slate-300">—</span>}</td>
+                    <td className="text-xs">
+                      <select value={users.find(u => u.role === 'trainer' && u.batchId === b.id)?.id || ''}
+                        onChange={e => assignTrainer(b, e.target.value)}
+                        className="border border-slate-200 rounded-md px-1.5 py-1 text-xs bg-white max-w-44">
+                        <option value="">{trainersOf(b.id) ? '' : '— assign trainer —'}</option>
+                        {trainers.map(t => <option key={t.id} value={t.id}>{t.name || t.email}</option>)}
+                      </select>
+                      {users.filter(u => u.role === 'trainer' && u.batchId === b.id).length > 1 && <span className="ml-1 text-[10px] text-slate-400">+{users.filter(u => u.role === 'trainer' && u.batchId === b.id).length - 1}</span>}
+                    </td>
                     <td className="text-center">{participantsOf(b.id)} <span className="text-slate-400">/ {enrolledOf(b.id)}</span></td>
                     <td className="text-slate-400 text-xs">{b.college}</td>
                   </tr>

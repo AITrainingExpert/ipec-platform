@@ -1101,3 +1101,15 @@ export async function completeMyUsn(user: User, usn: string): Promise<{ ok: bool
   localStorage.setItem('ipec_pw_' + user.email, usn);
   return { ok: true, passwordSet: true, msg: 'Saved' };
 }
+
+/** Admin: assign a trainer to a batch (trainer-access.sql). */
+export async function adminSetTrainerBatch(trainerId: string, batchId: string): Promise<{ ok: boolean; msg: string }> {
+  if (HAS_SUPABASE && supabase) {
+    const { error } = await supabase.rpc('admin_set_trainer_batch', { p_trainer: trainerId, p_batch: batchId });
+    if (!error) return { ok: true, msg: 'Saved' };
+    if (/admin_set_trainer_batch|could not find the function/i.test(error.message)) return { ok: false, msg: 'Run trainer-access.sql in Supabase once to turn on trainer assignment.' };
+    return { ok: false, msg: /NOT_ALLOWED/.test(error.message) ? 'Only the admin can assign trainers.' : error.message };
+  }
+  write(LS.users, read<User[]>(LS.users, []).map(u => (u.id === trainerId ? { ...u, batchId } : u)));
+  return { ok: true, msg: 'Saved' };
+}

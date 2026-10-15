@@ -16,13 +16,12 @@ const NAV: Record<string, { to: string; label: string }[]> = {
     { to: '/certificate', label: '🎓 Certificate' },
   ],
   trainer: [
+    // Trainers view their own batch only. Session control, enrolment and
+    // NBA / OBE are admin-only.
     { to: '/trainer', label: 'Batch Dashboard' },
-    { to: '/sessions', label: 'Session Control' },
-    { to: '/enrollment', label: 'Enrollment & Content' },
     { to: '/participants', label: 'Participants' },
     { to: '/analytics', label: 'Analytics' },
     { to: '/reports', label: 'Reports' },
-    { to: '/nba', label: 'NBA / OBE Report' },
   ],
   admin: [
     { to: '/admin', label: 'Admin' },

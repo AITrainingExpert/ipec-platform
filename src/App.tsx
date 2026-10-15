@@ -57,13 +57,13 @@ function Shell() {
         <Route path="/trainer" element={isStaff ? <TrainerDashboard /> : <Navigate to={home} />} />
         <Route path="/analytics" element={isStaff ? <Analytics /> : <Navigate to={home} />} />
         <Route path="/reports" element={isStaff ? <Reports /> : <Navigate to={home} />} />
-        <Route path="/sessions" element={isStaff ? <SessionControl /> : <Navigate to={home} />} />
-        <Route path="/enrollment" element={isStaff ? <Enrollment /> : <Navigate to={home} />} />
+        <Route path="/sessions" element={user.role === 'admin' ? <SessionControl /> : <Navigate to={home} />} />
+        <Route path="/enrollment" element={user.role === 'admin' ? <Enrollment /> : <Navigate to={home} />} />
         <Route path="/participants" element={isStaff ? <Participants /> : <Navigate to={home} />} />
 
         <Route path="/admin" element={user.role === 'admin' ? <AdminDashboard /> : <Navigate to={home} />} />
         <Route path="/certadmin" element={user.role === 'admin' ? <CertAdmin /> : <Navigate to={home} />} />
-        <Route path="/nba" element={isStaff ? <NbaReport /> : <Navigate to={home} />} />
+        <Route path="/nba" element={user.role === 'admin' ? <NbaReport /> : <Navigate to={home} />} />
         <Route path="/activity" element={user.role === 'admin' ? <AdminActivity /> : <Navigate to={home} />} />
         <Route path="/admin/participant/:userId/report" element={isStaff ? <AdminParticipantView /> : <Navigate to={home} />} />
         <Route path="/admin/participant/:userId/certificate" element={isStaff ? <AdminParticipantView /> : <Navigate to={home} />} />
